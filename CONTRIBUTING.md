@@ -15,7 +15,7 @@ Contributions should preserve these observation and persistence contracts.
 - Runtime `tools/result` and durable `tool/result` are different contracts. A successful
   runtime value is not automatically persisted, and inbox acceptance is not processing completion.
 - Current external plugins must not use `appendPluginRecord`; do not bypass this restriction
-  with casts or private APIs. The proposed first implementation uses independent supplementary storage.
+  with casts or private APIs. The implementation uses independent supplementary storage.
 
 ## Implementation and documentation
 
@@ -29,3 +29,11 @@ Contributions should preserve these observation and persistence contracts.
 - Do not copy discontinued runtime code or assume historical community findings remain current.
 - Keep documents self-contained after removal of the former research directory. Preserve
   attribution and licensing for migrated material; do not edit sibling projects incidentally.
+
+## Development
+
+Use Node.js 24.9 or later; the checked toolchain is Node.js 26.4.0 and TypeScript 6.0.3.
+For the audited upstream revision, run `npm run link:harness -- /path/to/deepseek-harness`
+against a prebuilt checkout. It creates links only under this project's ignored node_modules.
+Run `npm run check` for type checks, component tests, real Loader/AgentLoop integration and build.
+`npm pack` includes the built plugin, query CLI and bundle patch. A package release must build first.

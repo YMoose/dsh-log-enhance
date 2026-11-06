@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-log-enhance
+      name: dsh-log-enhance
+      config:
+        directory: .dsh-log-enhance

@@ -1,0 +1,50 @@
+{
+  "name": "dsh-log-enhance",
+  "version": "0.1.0",
+  "description": "Structured runtime evidence and message provenance for DeepSeek Harness logs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./records": "./dist/records.js",
+    "./query": "./dist/query.js"
+  },
+  "bin": { "dsh-log-enhance": "./dist/cli.js" },
+  "files": ["dist", "cordis.patch.yml", "README.md", "LICENSE", "docs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "engines": { "node": ">=24.9.0" },
+  "author": "YMOOSE <42179813+YMoose@users.noreply.github.com>",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/YMoose/dsh-log-enhance.git" },
+  "scripts": {
+    "prepack": "npm run build",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/*.test.js",
+    "test:integration": "npm run build && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/integration/*.test.js",
+    "check": "npm run typecheck && npm run test && npm run test:integration && npm run build",
+    "link:harness": "node scripts/link-harness.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-subagent": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis-plugin-loader": "1.1.0",
+    "@deepseek-ai/dsh-agent-loop": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-agent-loop-testkit": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-subagent-fork-in-process": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tool-subagent-control": "0.2.2-rc.1",
+    "@types/node": "22.20.1",
+    "typescript": "6.0.3"
+  }
+}
