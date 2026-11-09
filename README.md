@@ -34,12 +34,30 @@ node dist/cli.js query /path/to/.dsh-log-enhance
 输出包含接收消息、来源调用、已观察阶段、证据 ID 和覆盖缺口。只有明确匹配才标记 `linked`；
 回执缺失为 `unknown`，存在多个候选为 `ambiguous`。配置、协议与限制见 [使用说明](docs/runtime.md)。
 
+## MCP 分析服务
+
+第二能力：**只读 MCP 服务器**，直接读取 DSH 的 Session JSONL 存储目录
+（默认 `~/.dsh/sessions`），提供七个渐进获取的分析工具（`list-sessions`、
+`get-session-summary`、`list-events`、`get-event-detail`、`list-collaborations`、
+`get-token-bill`、`query-events`），供 DSH 自身或任何 MCP 客户端调用。
+独立运行（零依赖、崩溃隔离）：
+
+```sh
+npm run build
+node dist/mcp/standalone.js --root ~/.dsh/sessions
+```
+
+或在宿主 profile 中启用 `mcp.enabled`，插件会通过 `mcpManager` 自动登记
+（分析服务是独立子进程，其崩溃或缺失不影响插件本体）。工具语义、存储布局与
+隔离原则见 [MCP 分析服务](docs/mcp.md)。
+
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
 | [使用说明与记录协议](docs/runtime.md) | 配置、JSONL 记录、查询、持久化边界及已执行验证 |
 | [项目设计](docs/design.md) | 讨论结论、首版范围、关联记录示例、持久化方案与验收标准 |
+| [MCP 分析服务](docs/mcp.md) | 七个分析工具、会话存储读取、崩溃隔离与接入方式 |
 | [当前上游契约](docs/upstream-audit.md) | 当前源码证据、工具回执与日志的区别、Team 任务与成员模型、插件接口限制 |
 | [迁入的研究与经验](docs/research-handoff.md) | 旧项目中有用的社区资料、行为约束、失败场景和历史版本依据 |
 
