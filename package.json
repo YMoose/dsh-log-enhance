@@ -10,7 +10,10 @@
     "./records": "./dist/records.js",
     "./query": "./dist/query.js"
   },
-  "bin": { "dsh-log-enhance": "./dist/cli.js" },
+  "bin": {
+    "dsh-log-enhance": "./dist/cli.js",
+    "dsh-log-enhance-mcp": "./dist/mcp/standalone.js"
+  },
   "files": ["dist", "cordis.patch.yml", "README.md", "LICENSE", "docs"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "engines": { "node": ">=24.9.0" },
