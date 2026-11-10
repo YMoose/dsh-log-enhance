@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { PACKAGE_VERSION } from './version.js'
 
 export const SCHEMA_VERSION = 1
-export const PRODUCER = 'dsh-log-enhance/0.1.0'
+export const PRODUCER = `dsh-log-enhance/${PACKAGE_VERSION}`
 
 export interface EventRef {
   sessionId: string

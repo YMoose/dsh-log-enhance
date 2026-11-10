@@ -15,9 +15,10 @@ import { join } from 'node:path'
 import { runMcpStdioServer } from './protocol.js'
 import { SessionStore } from './session-store.js'
 import { analysisTools } from './tools.js'
+import { PACKAGE_VERSION } from '../version.js'
 
 const SERVER_NAME = 'dsh-log-enhance'
-const SERVER_VERSION = '0.2.0'
+const SERVER_VERSION = PACKAGE_VERSION
 
 const HELP = `Usage: dsh-log-enhance-mcp [--root <session-storage-dir>]
 
