@@ -37,3 +37,9 @@ For the audited upstream revision, run `npm run link:harness -- /path/to/deepsee
 against a prebuilt checkout. It creates links only under this project's ignored node_modules.
 Run `npm run check` for type checks, component tests, real Loader/AgentLoop integration and build.
 `npm pack` includes the built plugin, query CLI and bundle patch. A package release must build first.
+
+If the baseline test turns red after a dependency change (an `@deepseek-ai/*` republish or an
+unintentional re-pin), follow the revalidation flow in `docs/versioning.md` §5 — regenerate
+`baseline.json` only as part of an explicit re-verification, never to silence the test.
+The `test` scripts clear `dist-test/` first: `tsc` does not remove orphaned outputs from deleted
+test sources, and `node --test` would still run them.

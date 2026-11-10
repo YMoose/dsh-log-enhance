@@ -25,8 +25,8 @@
     "prepack": "npm run build",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/*.test.js",
-    "test:integration": "npm run build && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/integration/*.test.js",
+    "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/*.test.js",
+    "test:integration": "rm -rf dist-test && npm run build && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/integration/*.test.js",
     "check": "npm run typecheck && npm run test && npm run test:integration && npm run build",
     "link:harness": "node scripts/link-harness.mjs"
   },
