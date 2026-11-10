@@ -14,13 +14,29 @@
     "dsh-log-enhance": "./dist/cli.js",
     "dsh-log-enhance-mcp": "./dist/mcp/standalone.js"
   },
-  "files": ["dist", "cordis.patch.yml", "README.md", "LICENSE", "docs"],
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "engines": { "node": ">=24.9.0", "dsh": ">=0.2.2-rc.1 <0.3.0-0" },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
   "packageManager": "npm@11.9.0",
   "author": "YMOOSE <42179813+YMoose@users.noreply.github.com>",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/YMoose/dsh-log-enhance.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YMoose/dsh-log-enhance.git"
+  },
   "scripts": {
     "prepack": "npm run build",
     "build": "tsc -p tsconfig.json",
@@ -28,6 +44,7 @@
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/*.test.js",
     "test:integration": "rm -rf dist-test && npm run build && tsc -p tsconfig.test.json && node --test --test-isolation=none dist-test/tests/integration/*.test.js",
     "check": "npm run typecheck && npm run test && npm run test:integration && npm run build",
+    "check:compat": "node scripts/check-compat.mjs",
     "link:harness": "node scripts/link-harness.mjs"
   },
   "peerDependencies": {
@@ -39,6 +56,7 @@
     "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent-loop": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent-loop-testkit": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.2-rc.1",

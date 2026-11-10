@@ -1,10 +1,18 @@
 {
-  "generatedAt": "2026-11-10T04:40:08.350Z",
+  "generatedAt": "2026-11-10T05:22:25.345Z",
   "node": "v25.6.1",
   "packages": {
     "cordis": {
       "integrity": "sha512-CJrjNyBkKn1SfvBQUcgFYKFnLjS+uKrhdMsbHU60xabvi12d+xQ+IQSNlME5Z+B+4Zi6n4BDknKY94tEPeo47w==",
       "version": "4.1.0"
+    },
+    "cordis-plugin-group": {
+      "integrity": "sha512-VVGcw29YWG83D9YqYsivyfIkcPdd+tgrc/Lj4GkxS5n0i6++jpY6nNSKM/6JU7F7phUT/Q5Y9o30rcYbE1pW4w==",
+      "version": "1.1.0"
+    },
+    "cordis-plugin-include": {
+      "integrity": "sha512-tD5JTHTDU1j1bkjgTK150UUSzypBSVhHoEl7/vgpYiDt7Czg43++IFUKaRlwXHMl5WC51S8T2V7p2IHpJ1Ny0A==",
+      "version": "1.1.0"
     },
     "cordis-plugin-loader": {
       "integrity": "sha512-154u0LnADauDvOdQ41QtoOrRFQtvP2Ih68aYYaXzI/l7gRPwX/5MDtDDsJWeDffQA3ELn2xt3MUYsyizi+O9KA==",
@@ -24,6 +32,14 @@
     },
     "dsh-agent-loop-testkit": {
       "integrity": "sha512-G2yyhVAwxWtCA1JOW4J+m9wWpeN2yfFuuqKg/6fvxxqNNXHBse1zC3tPxGTurtnXSrjBOBfO7K3AhMryzNHFQA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-app-boot": {
+      "integrity": "sha512-eDGdx7SySAOtj7IFZtU/DVMXkfI+6skNeVTtujURtZUEA0ZNaOmUbwT+z4EsFjkg5x5o8PRwtnsDg+GKk+nn4Q==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-atomic-write": {
+      "integrity": "sha512-P9Ys/iN0WL6th9jB2uOsiEXaR3Kb/oVbiI42VPFa+AxtIhj4vYF6Tx8MvvRSxzDDxNWPrR1dsAuhxtI2pT+MVQ==",
       "version": "0.2.2-rc.1"
     },
     "dsh-attachment": {
@@ -62,8 +78,24 @@
       "integrity": "sha512-I9uMZxHl+aB5zHzb4Je8PIT32+BMco6iC6nn0tMGa5SvfwPt8WO0Bj/HZIVqOhZIhVVtNL3aiA6YL/vxPB8dPg==",
       "version": "0.2.2-rc.1"
     },
+    "dsh-home-paths": {
+      "integrity": "sha512-aSmGSng1Esg6RWkJtskFAU600qDmazzuto/QT0f2Tf3+qDS4yDTM68/YeWn/Jc5JxwvTJTc17njKCyRSXJhTrw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-launch-environment": {
+      "integrity": "sha512-LntAXt+qEUXnGsbUAs/2VAGcEf368ONvySagv/88amGkv+o0vYumZNX8JiAP+bxtVwnbspBg3jGlvdLyYPft8w==",
+      "version": "0.2.2-rc.1"
+    },
     "dsh-llm": {
       "integrity": "sha512-XeEvH+6bpkjx0E2P1B5ZE+WWa+VHp4DimQaJDKNUZEFouqHMuN1B61TIz6IzUquRxa/6X4yJy+qXQ9WwAeMw5w==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-official-bundles": {
+      "integrity": "sha512-A9+tzsoc8V57HAblw7d6T6QDglSxSHUk/3fJGTnOnv4fI8VgQ4WpoK0J+uiBIA2KAPLOtj/x8itVfvxzyhz3fg==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-package-manifest": {
+      "integrity": "sha512-/Dz9+N+iMLu4QaXC28Miy1ClgZpHcWEq+B7+BQVwekdWwEPyFrPPjcl6slTXtq2ZlhOh/lNhXousZzyg7TsyKA==",
       "version": "0.2.2-rc.1"
     },
     "dsh-ptc-runtime": {
