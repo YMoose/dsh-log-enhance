@@ -98,6 +98,29 @@ OTel [Span Link][span-link] 可关联同一或不同 trace 的 span，支持多�
 DSH 缺失的调用来源。原生事件身份仍应保留，OTel span 身份由适配层映射。
 后端是否实际保留、查询和展示 Links，需要独立验证。
 
+## 8. mcpManager 注册契约
+
+2026-11-10 对照本地 deepseek-harness checkout（提交即上述基线 `fcc0ad46`）补充核查；
+`dsh-mcp-manager` 不是本包依赖，node_modules 中无其发布产物，契约证据为上游源码与 README。
+cordis 侧行为同时对照本地 `@deepseek-ai/cordis@4.1.0`（其 `src/reflect.ts`、`src/utils.ts`
+与上游 vendor/cordis 一致）。降级与注册路径另有本仓库集成测试
+`tests/integration/mcp-mount.test.ts` 实证。
+
+| 接口或行为 | 已核实的含义 | 对本项目的影响 |
+|---|---|---|
+| [`ctx.mcpManager`][mcp-manager] | `@deepseek-ai/dsh-mcp-manager` 以 Service 形式提供并经声明合并挂到 Context；只有挂载了该 manager 的宿主才有（Web/Desktop profile 各挂载一次，见 [subsystems/mcp][mcp-docs]） | testkit 与最小组合天然没有该服务，插件必须按可缺失处理 |
+| [`register(name, entry)`][mcp-manager] | entry 接受除 `enabled` 外的全部配置字段，注册项在注册期间恒为 enabled；stdio 要求 `command` 非空，`env` 是追加的子进程环境，`cwd` 空串即默认工作目录；跨 transport 字段在写入点直接拒绝 | 本插件固定 stdio；`env: {}`/`cwd: ''` 是合法的"无追加"取值，不是遗漏 |
+| 注册返回的 dispose | 幂等移除注册并触发实例卸载，工具命名空间随之撤回；注册生命周期绑定调用插件 fiber——服务经调用方 context proxy 读取后，register 内部 `this.ctx` 解析为调用方 context（[vendored cordis trace][cordis-trace]），内部 effect 挂在注册插件上；上游示例以 `inject: ['mcpManager']` 声明必需依赖（[README][mcp-manager-readme]） | 本插件另行 `ctx.effect(() => () => dispose())` 显式接线，与 manager 自身的 fiber 绑定互为冗余 |
+| 名称与冲突 | `serverName` 须匹配 `[A-Za-z0-9_-]{1,32}`（[SERVER_NAME_PATTERN][mcp-client]）；与配置条目或其他注册重名、manager 已 disposed 时 register 同步抛错 | 重名或宿主残留状态只影响分析服务挂载，不应波及观察 |
+| 宿主无该服务时的读取 | 插件 fiber 上直接读 `ctx.mcpManager` 会抛 `cannot get property "mcpManager" without inject`（[vendored cordis reflect][cordis-reflect]），不是返回 undefined；可选服务的官方读法是 `ctx.get(name)`（未提供时返回 undefined） | 上游惯例是必需 `inject` 或 `ctx.get`；本插件选择属性读取 + try/catch 降级，依赖的是"读取抛错会被捕获"这一事实 |
+
+本项目调用事实（`src/index.ts` 的 `mountAnalysisServer`）：仅 `mcp.enabled` 时注册 stdio 条目，
+`command: process.execPath`，`args: [<dist>/mcp/standalone.js, '--root', sessionRoot]`，
+`startupTimeoutMs: 15_000`（manager schema 默认 30_000）；`sessionRoot` 空串回退 `~/.dsh/sessions`。
+任何失败——构建产物缺失、服务缺失导致的属性读取抛错、register 拒绝——只记一条 warn，
+观察与 journaling 不受影响。注意代码里的 `manager === undefined` 守卫对应"无 fiber 运行时的
+根上下文直读"形状；在插件 fiber 上代理读取先抛错，该守卫是第二道防线而非首要降级路径。
+
 [harness]: https://github.com/deepseek-ai/deepseek-harness/tree/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159
 [session]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/core/session/src/index.ts
 [batch]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/core/tools/src/batch.ts
@@ -121,3 +144,9 @@ DSH 缺失的调用来源。原生事件身份仍应保留，OTel span 身份由
 [session-otel]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/session/session-telemetry-otel/README.md
 [genai]: https://github.com/open-telemetry/semantic-conventions-genai/tree/e713f345c1d5f6d888b2f3bbddf1a863395b784c/docs/gen-ai
 [span-link]: https://opentelemetry.io/docs/specs/otel/trace/api/#link
+[mcp-manager]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/mcp/mcp-manager/src/index.ts
+[mcp-manager-readme]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/mcp/mcp-manager/README.md#registering-a-server-from-a-plugin
+[mcp-docs]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/docs/subsystems/mcp.md
+[mcp-client]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/mcp/mcp-client/src/index.ts
+[cordis-reflect]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/vendor/cordis/src/reflect.ts
+[cordis-trace]: https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/vendor/cordis/src/utils.ts
