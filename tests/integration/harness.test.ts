@@ -33,7 +33,7 @@ class Adapter extends LlmAdapter {
     const isChild = options.messages.some(message => message.role === 'user' &&
       message.content.some(part => part.type === 'text' && part.text === 'CHILD_START'))
     if (isChild && !options.messages.some(message => message.role === 'tool')) {
-      const args = JSON.stringify({ agent: 'lead', message: 'PRIVATE_PAYLOAD' })
+      const args = JSON.stringify({ agent_id: 'B', message: 'PRIVATE_PAYLOAD' })
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'tool-call-delta', index: 0, id: ToolCallId('call-123'), name: 'send_message', argumentsDelta: args }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId('call-123'), name: 'send_message', arguments: args } }
@@ -79,8 +79,9 @@ async function scenario(enabled: boolean, rejectReceiver = false, failAfterDeliv
     ctx.llm.registerAdapter(['fixture'], adapter)
     const parent = await ctx.agentLoop.create(SessionId('B'), { provider: 'fixture', model: 'fixture' })
     const activations = await Promise.all(Array.from({ length: senders }, (_, index) => ctx.subagents.startActivation({
-      delivery: 'caller', provider: 'spawn', label: `sender-${index}`, name: `sender-${index}`,
-      prompt: [{ type: 'text', text: 'CHILD_START' }], parent, signal: new AbortController().signal,
+      delivery: 'caller', provider: 'spawn', label: `sender-${index}`, childId: SessionId(`sender-${index}`),
+      request: { prompt: [{ type: 'text', text: 'CHILD_START' }], parent },
+      signal: new AbortController().signal,
     })))
     await Promise.all(activations.map(activation => activation.result))
     await parent.whenIdle()
@@ -90,8 +91,9 @@ async function scenario(enabled: boolean, rejectReceiver = false, failAfterDeliv
       await ctx.loader.update(entry, { disabled: false })
       await ctx.loader.await()
       const forked = await ctx.subagents.startActivation({
-        delivery: 'caller', provider: 'fork', label: 'forked', name: 'forked',
-        prompt: [{ type: 'text', text: 'FORK_START' }], parent, signal: new AbortController().signal,
+        delivery: 'caller', provider: 'fork', label: 'forked', childId: SessionId('forked'),
+        request: { prompt: [{ type: 'text', text: 'FORK_START' }], parent },
+        signal: new AbortController().signal,
       })
       await forked.result
       await parent.whenIdle()
