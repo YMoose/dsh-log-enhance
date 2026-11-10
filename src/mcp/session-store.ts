@@ -261,6 +261,15 @@ export class SessionStore {
     this.maxCachedEvents = options.maxCachedEvents ?? 200_000
   }
 
+  /** Whether the configured root directory currently exists. */
+  async rootExists(): Promise<boolean> {
+    try {
+      return (await stat(this.root)).isDirectory()
+    } catch {
+      return false
+    }
+  }
+
   /** Discover sessions and resolve their headers. Unreadable entries are skipped. */
   async list(): Promise<SessionListing[]> {
     const artifacts = await discoverArtifacts(this.root)

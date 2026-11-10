@@ -122,7 +122,9 @@ export function analysisTools(): ToolSpec[] {
       description: 'List sessions in the DSH session storage. Returns light header metadata per session '
         + '(id, cwd, creation time, format version, file size, last modified). Order: newest first. '
         + 'Filters: cwd substring, after/before (ISO 8601 or epoch ms) on creation time, min_events '
-        + '(forces a full parse of each candidate). Default max_results 50, cap 200.',
+        + '(forces a full parse of each candidate). Default max_results 50, cap 200. The response '
+        + 'carries root_exists: false when the configured storage root is missing, so it is '
+        + 'distinguishable from a genuinely empty root.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -165,14 +167,20 @@ export function analysisTools(): ToolSpec[] {
           listings = kept
         }
         listings = [...listings].sort((a, b) => b.header.createdAt - a.header.createdAt)
-        return { total: listings.length, returned: Math.min(maxResults, listings.length), sessions: listings.slice(0, maxResults).map(listingRow) }
+        return {
+          total: listings.length,
+          returned: Math.min(maxResults, listings.length),
+          root_exists: await store.rootExists(),
+          sessions: listings.slice(0, maxResults).map(listingRow),
+        }
       },
     },
     {
       name: 'get-session-summary',
       description: 'Full picture of one session: activity counts (turns, steps, messages, tool calls), '
-        + 'token totals (billed input = input + cacheRead + cacheWrite), tool distribution, and latency '
-        + 'statistics. Use list-sessions first to find the id.',
+        + 'token totals (billed input = input + cacheRead + cacheWrite), tool distribution (top 10 '
+        + 'by calls; tools_truncated flags when more exist), and latency statistics. '
+        + 'Use list-sessions first to find the id.',
       inputSchema: {
         type: 'object',
         properties: { session_id: ref },
@@ -278,21 +286,25 @@ export function analysisTools(): ToolSpec[] {
       },
       async run(args, store) {
         const parsed = await loadSession(store, requireString(args, 'session_id'))
-        const groupBy = args['group_by'] === 'step' ? 'step' : 'turn'
-        return tokenBill(parsed, groupBy) as unknown as Record<string, unknown>
+        const rawGroupBy = args['group_by']
+        if (rawGroupBy !== undefined && rawGroupBy !== 'turn' && rawGroupBy !== 'step') {
+          throw new ToolError('"group_by" must be one of: "turn", "step"')
+        }
+        return tokenBill(parsed, rawGroupBy === 'step' ? 'step' : 'turn') as unknown as Record<string, unknown>
       },
     },
     {
       name: 'query-events',
       description: 'Generic exact-match filter over events when the dedicated tools do not fit. '
-        + 'filter maps dotted paths to expected values, compared by deep JSON equality, e.g. '
+        + 'filter maps dotted paths to expected values, compared by structural equality '
+        + '(object key order is irrelevant, array order is significant), e.g. '
         + '{"type": "tool/call", "data.name": "read"} or {"data.turn": 2}. Missing paths never match. '
         + 'Rows are the same shape as list-events. Default max_results 50, cap 500.',
       inputSchema: {
         type: 'object',
         properties: {
           session_id: ref,
-          filter: { type: 'object', description: 'Dotted path → expected value (deep equality)' },
+          filter: { type: 'object', description: 'Dotted path → expected value (structural equality)' },
           max_results: { type: 'number' },
         },
         required: ['session_id', 'filter'],

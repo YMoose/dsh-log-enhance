@@ -60,6 +60,39 @@ test('tool failures become isError results and the server keeps answering', asyn
   })
 })
 
+test('get-token-bill rejects a group_by outside turn/step instead of silently defaulting', async () => {
+  await withSessionRoot([primarySession()], async root => {
+    const s = server(new SessionStore(root))
+    const call = async (groupBy: unknown): Promise<{ isError?: boolean, content?: Array<{ text: string }> }> =>
+      (await s.handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get-token-bill', arguments: { session_id: '-1111', group_by: groupBy } } }))?.result as { isError?: boolean, content?: Array<{ text: string }> }
+    for (const bad of ['banana', 3, null]) {
+      const rejected = await call(bad)
+      assert.equal(rejected.isError, true)
+      assert.match(rejected.content?.[0]?.text ?? '', /"group_by" must be one of: "turn", "step"/)
+    }
+    const valid = await call('turn')
+    assert.equal(valid.isError, undefined)
+    const defaulted = await call(undefined)
+    assert.equal(defaulted.isError, undefined)
+  })
+})
+
+test('list-sessions distinguishes a missing storage root from an empty one', async () => {
+  await withSessionRoot([primarySession()], async root => {
+    const answer = async (store: SessionStore): Promise<Record<string, unknown>> => {
+      const response = await server(store).handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list-sessions', arguments: {} } })
+      return JSON.parse(((response?.result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}')) as Record<string, unknown>
+    }
+    const existing = await answer(new SessionStore(root))
+    assert.equal(existing.root_exists, true)
+    assert.equal(existing.total, 1)
+    const missing = await answer(new SessionStore(join(root, 'no-such-root')))
+    assert.equal(missing.root_exists, false)
+    assert.equal(missing.total, 0)
+    assert.deepEqual(missing.sessions, [])
+  })
+})
+
 test('stdio loop survives a garbage line and answers everything in order', async () => {
   await withSessionRoot([primarySession()], async root => {
     const input = new PassThrough()
