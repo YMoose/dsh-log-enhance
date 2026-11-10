@@ -1,0 +1,60 @@
+# S1 PR/push gate — see docs/versioning.md §4.
+# All third-party actions are pinned to commit SHAs (a gate must not ride a
+# floating tag); the comment under each `uses:` records the ref it resolved from.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck, tests, build, compat gate, pack smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        # v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          # engines.node lower bound (>=24.9.0); "24" resolves to latest 24.x
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies exactly as locked
+        run: npm ci
+
+      - name: Typecheck, unit + integration tests, build
+        run: npm run check
+
+      - name: Run the official dsh compatibility gate on the plugin manifest
+        run: npm run check:compat
+
+      - name: Pack the publishable tarball
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+
+      - name: Unpack the tarball for the install smoke test
+        run: |
+          mkdir smoke
+          tar -xzf "$RUNNER_TEMP"/dsh-log-enhance-*.tgz -C smoke
+          test -f smoke/package/package.json
+
+      # Install smoke test of the PACKED artifact. The checker action has no
+      # tarball input (rootPath is a directory), so it runs against the
+      # unpacked tarball — exactly the file set an npm publish would ship.
+      # dshVersion is the current verification baseline and must be bumped in
+      # lockstep with engines.dsh's lower bound and the devDependency train
+      # fingerprinted in baseline.json (three places, changed together).
+      - name: Install the packed plugin with dsh and verify the layer mounts
+        # repo head 2026-08-18 (dormant upstream — never reference by tag)
+        uses: bowenliang123/dsh-plugin-checker@e19b9d2f33a0bd3b9636670e4d2525f3ef8ecfb7
+        with:
+          rootPath: smoke/package
+          dshVersion: 0.2.2-rc.1
