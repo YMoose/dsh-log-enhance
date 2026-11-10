@@ -25,13 +25,13 @@ Phoenix 查询的是已投影入库的 span，本服务查询的是原始事件�
 
 | 工具 | 输入（概要） | 输出 |
 |---|---|---|
-| `list-sessions` | `cwd?`、`after?`、`before?`、`min_events?`、`max_results?` | 会话列表：id、cwd、创建时间、格式版本、文件大小、最后修改时间 |
-| `get-session-summary` | `session_id` | 单会话画像：事件/轮次/步/工具计数、token 分解、工具分布、时延统计 |
+| `list-sessions` | `cwd?`、`after?`、`before?`、`min_events?`、`max_results?` | 会话列表：id、cwd、创建时间、格式版本、文件大小、最后修改时间；`root_exists` 区分存储根缺失与真空目录 |
+| `get-session-summary` | `session_id` | 单会话画像：事件/轮次/步/工具计数、token 分解、工具分布（top 10，超出置 `tools_truncated`）、时延统计 |
 | `list-events` | `session_id`、`type?`、`turn?`、`step?`、`from_seq?`、`to_seq?`、`max_results?` | 事件行：seq、type、time、turn/step、预览文本；返回 `next_from_seq` 续读 |
 | `get-event-detail` | `session_id`、`seq`、`max_chars?` | 单个事件的完整 JSON（超长截断并标记） |
 | `list-collaborations` | `session_id` | 跨 Agent 交互行：subagent 派发/结算、send_message 调用 |
-| `get-token-bill` | `session_id`、`group_by`（turn/step） | 按 turn 或 step 分组的 token 账单 |
-| `query-events` | `session_id`、`filter`（点路径深相等）、`max_results?` | 通用过滤逃生门，行同 `list-events` |
+| `get-token-bill` | `session_id`、`group_by`（turn/step，其他值显式报错） | 按 turn 或 step 分组的 token 账单 |
+| `query-events` | `session_id`、`filter`（点路径结构相等，对象键序无关）、`max_results?` | 通用过滤逃生门，行同 `list-events` |
 
 工具通过 MCP 客户端接入后命名空间为 `mcp__<serverName>__<toolName>`。
 
@@ -40,6 +40,8 @@ Phoenix 查询的是已投影入库的 span，本服务查询的是原始事件�
 - `session_id` 支持全 id 或唯一后缀；后缀歧义时报错并列出候选。
 - 计费输入（billed input）= `inputTokens + cacheReadTokens + cacheWriteTokens`
   （三字段互斥相加，依据 TokenUsage 契约）。
+- 摘要 tokens 中的 `peak_message_billed_input` 是**单条 assistant 消息**计费输入的
+  最大值（逐消息口径，不是步内求和后的峰值；步级聚合用 `get-token-bill`）。
 - 事件行中的 `time` 为原始 Unix 毫秒；摘要中的人读时间用 ISO 8601。
 - `v3` 与 `v4` 格式都支持（v3 的 tool/result 内容嵌套在 `tool-result` 块内，
   统一折算字符数）；同一会话目录存在多代文件时读取**最高版本**。
@@ -133,6 +135,42 @@ dsh-log-enhance:
   看到什么"）、异常模式检测（空返回、失败后内联爆发、轮询）、Journal 证据
   JOIN（`get-log-enhance`）、多会话对比。
 - 快照脱敏文件（无 `seq`/`time`）能容忍解析，但过滤与排序退化为数组序。
+
+### 内存模型
+
+分析层什么全量进内存、什么流式、上限在哪，如实列出：
+
+- **会话发现是轻量的**：`list-sessions` 对每个会话文件只读头部至多 64 KiB
+  （`readHead`）解出会话头行，不做全量解析。例外是 `min_events` 过滤，它会
+  对过滤后的每个候选会话强制一次全量解析。
+- **单个会话的查询是全量进内存**：`SessionStore.load` 一次性读入整个文件
+  （zstd 容器先整体读入原始字节，再逐帧解压为完整文本），事件数组全部驻留
+  内存后才做聚合。**单次解析没有事件数上限**——超大会话文件意味着同量级的
+  内存占用。
+- **解析缓存有界**：按"缓存中的事件总数"封顶，默认 200,000 事件
+  （`maxCachedEvents`，构造时可调），超限从最旧条目开始逐出；文件
+  stat（mtime+size）变化即失效。注意若单个会话本身超过上限，它仍会被缓存
+  （逐出只能移除其他条目），因此该上限约束的是常规情况下的驻留总量。
+- **工具输出本身有界**：`list-events`/`query-events` 每次至多 500 行（默认
+  50），`get-event-detail` 序列化后至多 2,000,000 字符（超出截断并置
+  `truncated`），摘要的工具榜至多 10 行（超出置 `tools_truncated`）。输出
+  有界不改变"单会话全量解析在先"的事实。
+- **对照：采集侧 CLI 查询是流式的**。Journal 读取按 16 KiB 块流式扫描、
+  单行上限 64 KiB；`project()` 设有显式 `maxRecords` 内存上限（默认
+  100,000），超限直接报错而不是悄悄返回半张图（该行为有单测覆盖）。
+  MCP 分析层目前没有对应的单会话规模上限。
+
+### 已验证规模上限（tested ceiling）
+
+诚实声明，不夸大：
+
+- 自动化测试中的最大会话 fixture 是 16 个事件（`primarySession`）；截断
+  类边界用例也不超过几十个事件。
+- 集成测试跑在真实持久化栈上，但同样只有个位数会话、每会话几十个事件以内。
+- 200,000 事件的缓存逐出上限、500 行 / 2,000,000 字符的输出上限，均未在
+  自动化测试中以真实规模验证过。
+- 至今最大规模的一次验证是手工的：842 帧 / 1555 行的真实会话文件
+  （2026-11-09，见 §8）。
 
 ## 8. 验证记录
 
