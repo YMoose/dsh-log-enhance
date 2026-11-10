@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collaborations, eventRow, matchesFilter, summarize, tokenBill } from '../src/mcp/analysis.js'
 import { SessionStore } from '../src/mcp/session-store.js'
+import type { SessionEvent } from '../src/mcp/session-store.js'
 import { legacySession, primarySession, withSessionRoot } from './mcp-fixtures.js'
 
 async function loadPrimary(): Promise<Awaited<ReturnType<SessionStore['load']>>> {
@@ -31,7 +32,7 @@ test('summary counts activity, tokens, tools, and latency from native facts', as
   assert.equal(summary.tokens.billedInputTokens, 2405)
   assert.equal(summary.tokens.outputTokens, 23)
   assert.equal(summary.tokens.cacheReadTokens, 2250)
-  assert.equal(summary.tokens.peak_step_billed_input, 1230)
+  assert.equal(summary.tokens.peak_message_billed_input, 1230)
   assert.ok(Math.abs(summary.tokens.cache_read_share - 2250 / 2405) < 0.0005)
   const subagent = summary.tools.find(tool => tool.name === 'subagent')
   assert.equal(subagent?.calls, 1)
@@ -125,4 +126,87 @@ test('query filter matches dotted paths by deep equality and rejects missing pat
   assert.equal(events.filter(event => matchesFilter(event, { 'data.name': 'send_message' })).length, 1)
   assert.equal(events.filter(event => matchesFilter(event, { 'data.turn': 1, 'data.step': 2 })).length, 4)
   assert.equal(events.filter(event => matchesFilter(event, { 'data.nope': 1 })).length, 0)
+})
+
+test('query filter equality is structural: object key order is irrelevant, array order is significant', async () => {
+  const parsed = await loadPrimary()
+  // The seq-10 usage object with its keys written in a different order still matches.
+  const reorderedUsage = { cacheWriteTokens: 0, cacheReadTokens: 1000, outputTokens: 5, inputTokens: 20 }
+  assert.equal(parsed.events.filter(event => matchesFilter(event, { 'data.usage': reorderedUsage })).length, 1)
+  const event = { type: 'weird/event', seq: 90, time: 1, data: { list: [1, 2], nested: { x: 1, y: { b: 2, a: 3 } } } } as SessionEvent
+  assert.equal(matchesFilter(event, { 'data.nested': { y: { a: 3, b: 2 }, x: 1 } }), true)
+  assert.equal(matchesFilter(event, { 'data.list': [1, 2] }), true)
+  assert.equal(matchesFilter(event, { 'data.list': [2, 1] }), false)
+  assert.equal(matchesFilter(event, { 'data.nested': { x: 1, y: { a: 3 } } }), false)
+})
+
+test('a step whose start lacks a timestamp is skipped from latency aggregates, not zero-based', async () => {
+  await withSessionRoot([
+    {
+      sessionId: 'session-notime-0',
+      batches: [[
+        { type: 'step/start', seq: 0, time: 1_000, data: { turn: 1, step: 1 } },
+        { type: 'step/end', seq: 1, time: 6_000, data: { turn: 1, step: 1 } },
+        { type: 'step/start', seq: 2, data: { turn: 1, step: 2 } }, // no time: must not fake a 0-based duration
+        { type: 'step/end', seq: 3, time: 50_000, data: { turn: 1, step: 2 } },
+      ]],
+    },
+  ], async root => {
+    const summary = summarize(await new SessionStore(root).load('session-notime-0'))
+    assert.equal(summary.activity.steps, 2)
+    assert.equal(summary.latency_ms.step_p50, 5_000)
+    assert.equal(summary.latency_ms.step_p95, 5_000)
+  })
+})
+
+test('replayed settlement notices dedupe symmetrically for dispatched children and orphans', async () => {
+  const settled = (seq: number, time: number, sender: string, text: string) => ({
+    type: 'user/message', seq, time,
+    data: { content: [{ type: 'text', text }], source: { kind: 'subagent-settled', senderSessionId: sender } },
+  })
+  await withSessionRoot([
+    {
+      sessionId: 'session-dedup-0',
+      batches: [[
+        { type: 'tool/call', seq: 1, time: 1_000, data: { turn: 1, step: 1, callId: 'c1', name: 'subagent', arguments: '{"prompt":"p"}' } },
+        {
+          type: 'tool/result', seq: 2, time: 2_000,
+          data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: 'started subagent child-1' }] } },
+        },
+        settled(3, 10_000, 'child-1', 'first'),
+        settled(4, 11_000, 'child-1', 'replay'),
+        settled(5, 12_000, 'foreign-1', 'first'),
+        settled(6, 13_000, 'foreign-1', 'replay'),
+      ]],
+    },
+  ], async root => {
+    const rows = collaborations(await new SessionStore(root).load('session-dedup-0'))
+    assert.equal(rows.length, 2) // one dispatch row plus one orphan row; both replays dropped
+    const dispatch = rows.find(row => row.kind === 'subagent')
+    assert.equal(dispatch?.settled_seq, 3)
+    assert.equal(dispatch?.report_chars, 5)
+    assert.equal(dispatch?.duration_ms, 9_000)
+    const orphan = rows.find(row => row.kind === 'subagent-settled')
+    assert.equal(orphan?.seq, 5)
+    assert.equal(orphan?.report_chars, 5)
+  })
+})
+
+test('summary tool distribution is capped at ten rows and flags truncation', async () => {
+  const manyTools = {
+    sessionId: 'session-manytools-0',
+    batches: [Array.from({ length: 11 }, (_, index) => ({
+      type: 'tool/call', seq: index, time: 1_000,
+      data: { turn: 1, step: 1, callId: `c${String(index)}`, name: `tool-${String(index)}`, arguments: '{}' },
+    }))],
+  }
+  await withSessionRoot([primarySession(), manyTools], async root => {
+    const store = new SessionStore(root)
+    const primary = summarize(await store.load('session-aaaa-1111'))
+    assert.ok(primary.tools.length <= 10)
+    assert.equal(primary.tools_truncated, false)
+    const capped = summarize(await store.load('session-manytools-0'))
+    assert.equal(capped.tools.length, 10)
+    assert.equal(capped.tools_truncated, true)
+  })
 })

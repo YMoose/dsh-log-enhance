@@ -52,7 +52,8 @@ export interface SessionSummary {
   }
   readonly tokens: TokenUsage & {
     readonly cache_read_share: number
-    readonly peak_step_billed_input: number
+    /** Largest billed input on a single assistant message (per-message, not a per-step sum). */
+    readonly peak_message_billed_input: number
   }
   readonly tools: ReadonlyArray<{
     readonly name: string
@@ -60,6 +61,8 @@ export interface SessionSummary {
     readonly errors: number
     readonly result_chars: number
   }>
+  /** More distinct tools exist than the (at most ten) rows returned. */
+  readonly tools_truncated: boolean
   readonly latency_ms: {
     readonly wall: number
     readonly step_p50: number
@@ -236,7 +239,7 @@ export function summarize(parsed: ParsedSession): SessionSummary {
   const tools = new Map<string, { calls: number, errors: number, result_chars: number }>()
   const callsById = new Map<string, ToolCallInfo>()
   const totals = emptyUsage()
-  let peakStepBilled = 0
+  let peakMessageBilled = 0
   let assistantMessages = 0
   let userMessages = 0
   let toolCalls = 0
@@ -261,8 +264,11 @@ export function summarize(parsed: ParsedSession): SessionSummary {
         break
       case 'step/start':
         if (data !== undefined && typeof data['turn'] === 'number' && typeof data['step'] === 'number') {
-          steps.add(`${String(data['turn'])}.${String(data['step'])}`)
-          stepStarts.set(`${String(data['turn'])}.${String(data['step'])}`, numberOr(event.time, 0))
+          const key = `${String(data['turn'])}.${String(data['step'])}`
+          steps.add(key)
+          // A start without a timestamp cannot join time-based aggregation; skip it
+          // there (the step still counts toward activity.steps).
+          if (typeof event.time === 'number' && Number.isFinite(event.time)) stepStarts.set(key, event.time)
         }
         break
       case 'step/end':
@@ -276,7 +282,7 @@ export function summarize(parsed: ParsedSession): SessionSummary {
         const usage = usageOf(event)
         if (usage !== undefined) {
           addUsage(totals, usage)
-          peakStepBilled = Math.max(peakStepBilled, usage.billedInputTokens)
+          peakMessageBilled = Math.max(peakMessageBilled, usage.billedInputTokens)
         }
         break
       }
@@ -360,9 +366,10 @@ export function summarize(parsed: ParsedSession): SessionSummary {
     tokens: {
       ...totals,
       cache_read_share: billedTotal === 0 ? 0 : Math.round((totals.cacheReadTokens / billedTotal) * 1000) / 1000,
-      peak_step_billed_input: peakStepBilled,
+      peak_message_billed_input: peakMessageBilled,
     },
     tools: toolRows,
+    tools_truncated: toolRows.length < tools.size,
     latency_ms: {
       wall: firstTime !== undefined && lastTime !== undefined ? lastTime - firstTime : 0,
       step_p50: percentile(sortedDurations, 0.5),
@@ -524,10 +531,12 @@ export function collaborations(parsed: ParsedSession): CollaborationRow[] {
       if (typeof sender !== 'string') continue
       const stopReason = typeof source['stopReason'] === 'string' ? source['stopReason'] : null
       const reportChars = textChars(data?.['content'])
+      // The first settlement notice per child wins — symmetrically for dispatched
+      // children and orphans, so a replayed notice never duplicates a row.
+      if (settledChildren.has(sender)) continue
+      settledChildren.add(sender)
       const dispatch = dispatchByChild.get(sender)
       if (dispatch !== undefined) {
-        if (settledChildren.has(sender)) continue
-        settledChildren.add(sender)
         dispatch.settled_seq = event.seq ?? null
         dispatch.stop_reason = stopReason
         dispatch.report_chars = reportChars
@@ -610,15 +619,32 @@ export function eventRow(event: SessionEvent): EventRow {
 
 /**
  * Exact-match filter over dotted paths into an event (`data.name`, `seq`, …).
- * Values compare by deep JSON equality; missing paths never match.
+ * Values compare by structural equality — object key order is irrelevant,
+ * array order is significant; missing paths never match.
  */
 export function matchesFilter(event: SessionEvent, filter: Record<string, unknown>): boolean {
   for (const [path, expected] of Object.entries(filter)) {
     const actual = resolvePath(event, path.split('.'))
     if (actual === undefined) return false
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) return false
+    if (!jsonEqual(actual, expected)) return false
   }
   return true
+}
+
+/** Structural equality over JSON-shaped values: object keys unordered, array order significant. */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a === 'number' && typeof b === 'number') return Number.isNaN(a) && Number.isNaN(b)
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((item, index) => jsonEqual(item, b[index]))
+  }
+  const left = asRecord(a)
+  const right = asRecord(b)
+  if (left === undefined || right === undefined) return false
+  const leftKeys = Object.keys(left)
+  if (leftKeys.length !== Object.keys(right).length) return false
+  return leftKeys.every(key => key in right && jsonEqual(left[key], right[key]))
 }
 
 function resolvePath(value: unknown, segments: readonly string[]): unknown {
