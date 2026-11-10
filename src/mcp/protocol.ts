@@ -183,7 +183,7 @@ export async function runMcpStdioServer(input: Readable, output: Writable, optio
       options.onError?.(`write failed, dropping further responses: ${String(error)}`)
     }
   }
-  const pending: string[] = []
+  const pending: Buffer[] = []
   const onLine = (line: string): Promise<void> => {
     const trimmed = line.trim()
     if (trimmed === '') return Promise.resolve()
@@ -207,18 +207,21 @@ export async function runMcpStdioServer(input: Readable, output: Writable, optio
       chain.then(() => resolve(), () => resolve())
     }
     input.on('data', (chunk: Buffer | string) => {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+      // Accumulate bytes and split on the newline *byte* before decoding: a
+      // UTF-8 sequence may span chunk boundaries, and decoding each chunk
+      // separately would replace its halves with U+FFFD and fail the parse.
+      const buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
       let start = 0
-      for (let newline = text.indexOf('\n'); newline !== -1; newline = text.indexOf('\n', start)) {
-        const line = pending.join('') + text.slice(start, newline)
+      for (let newline = buffer.indexOf(10, start); newline !== -1; newline = buffer.indexOf(10, start)) {
+        const line = Buffer.concat([...pending, buffer.subarray(start, newline)]).toString('utf8')
         pending.length = 0
         chain = chain.then(() => onLine(line), () => onLine(line))
         start = newline + 1
       }
-      pending.push(text.slice(start))
+      pending.push(buffer.subarray(start))
     })
     input.on('end', () => {
-      const rest = pending.join('')
+      const rest = Buffer.concat(pending).toString('utf8')
       pending.length = 0
       if (rest.trim() !== '') chain = chain.then(() => onLine(rest), () => onLine(rest))
       finish()

@@ -170,3 +170,33 @@ test('standalone server speaks MCP end to end over real stdio', async () => {
     }
   })
 })
+
+test('a UTF-8 character split across chunk boundaries still parses its line', async () => {
+  await withSessionRoot([primarySession()], async root => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const done = runMcpStdioServer(input, output, { ...SERVER, tools: analysisTools(), store: new SessionStore(root) })
+    const lines: string[] = []
+    output.on('data', chunk => {
+      for (const piece of chunk.toString('utf8').split('\n')) {
+        if (piece !== '') lines.push(piece)
+      }
+    })
+    const payload = `${JSON.stringify({
+      jsonrpc: '2.0', id: 99, method: 'tools/call',
+      params: { name: 'query-events', arguments: { session_id: 'session-aaaa-1111', filter: { 'data.name': '发送消息' } } },
+    })}\n`
+    const bytes = Buffer.from(payload, 'utf8')
+    // Cut one byte into the 3-byte character 发: the two halves are invalid UTF-8 on their own.
+    const cut = bytes.indexOf(Buffer.from('发', 'utf8')) + 1
+    assert.ok(cut > 0 && cut < bytes.length - 1)
+    input.write(bytes.subarray(0, cut))
+    input.write(bytes.subarray(cut))
+    input.end()
+    await done
+    assert.equal(lines.length, 1)
+    const response = JSON.parse(lines[0] as string) as { id?: number, error?: { code: number } }
+    assert.equal(response.id, 99)
+    assert.equal(response.error, undefined)
+  })
+})
