@@ -27,11 +27,11 @@ Phoenix 查询的是已投影入库的 span，本服务查询的是原始事件�
 |---|---|---|
 | `list-sessions` | `cwd?`、`after?`、`before?`、`min_events?`、`max_results?` | 会话列表：id、cwd、创建时间、格式版本、文件大小、最后修改时间；`root_exists` 区分存储根缺失与真空目录 |
 | `get-session-summary` | `session_id` | 单会话画像：事件/轮次/步/工具计数、token 分解、工具分布（top 10，超出置 `tools_truncated`）、时延统计 |
-| `list-events` | `session_id`、`type?`、`turn?`、`step?`、`from_seq?`、`to_seq?`、`max_results?` | 事件行：seq、type、time、turn/step、预览文本；返回 `next_from_seq` 续读 |
+| `list-events` | `session_id`、`type?`、`turn?`、`step?`、`from_seq?`、`to_seq?`、`after_seq?`、`max_results?` | 事件行：seq、type、time、turn/step、预览文本；返回 `next_after_seq` 续读 |
 | `get-event-detail` | `session_id`、`seq`、`max_chars?` | 单个事件的完整 JSON（超长截断并标记） |
 | `list-collaborations` | `session_id` | 跨 Agent 交互行：subagent 派发/结算、send_message 调用 |
 | `get-token-bill` | `session_id`、`group_by`（turn/step，其他值显式报错） | 按 turn 或 step 分组的 token 账单 |
-| `query-events` | `session_id`、`filter`（点路径结构相等，对象键序无关）、`max_results?` | 通用过滤逃生门，行同 `list-events` |
+| `query-events` | `session_id`、`filter`（点路径结构相等，对象键序无关）、`after_seq?`、`max_results?` | 通用过滤逃生门，行同 `list-events` |
 
 工具通过 MCP 客户端接入后命名空间为 `mcp__<serverName>__<toolName>`。
 
@@ -43,6 +43,8 @@ Phoenix 查询的是已投影入库的 span，本服务查询的是原始事件�
 - 摘要 tokens 中的 `peak_message_billed_input` 是**单条 assistant 消息**计费输入的
   最大值（逐消息口径，不是步内求和后的峰值；步级聚合用 `get-token-bill`）。
 - 事件行中的 `time` 为原始 Unix 毫秒；摘要中的人读时间用 ISO 8601。
+- `list-events` 和 `query-events` 有后续匹配项时返回 `next_after_seq`，下一次请求将其传给
+  `after_seq`（排他性下界）。过滤在分页之前完成，确保稀疏匹配连续翻页不遗漏、不重复。
 - `v3` 与 `v4` 格式都支持（v3 的 tool/result 内容嵌套在 `tool-result` 块内，
   统一折算字符数）；同一会话目录存在多代文件时读取**最高版本**。
 

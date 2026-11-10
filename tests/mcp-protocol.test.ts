@@ -60,6 +60,44 @@ test('tool failures become isError results and the server keeps answering', asyn
   })
 })
 
+test('filtered event pages cover every match exactly once, including generic queries', async () => {
+  await withSessionRoot([{
+    sessionId: 'session-sparse-pages',
+    batches: [[
+      { type: 'alpha', seq: 0, data: { turn: 1 } },
+      { type: 'beta', seq: 1, data: { turn: 1 } },
+      { type: 'alpha', seq: 2, data: { turn: 1 } },
+      { type: 'gamma', seq: 3, data: { turn: 2 } },
+      { type: 'alpha', seq: 4, data: { turn: 2 } },
+      { type: 'alpha', seq: 5, data: { turn: 2 } },
+    ]],
+  }], async root => {
+    const s = server(new SessionStore(root))
+    const collectSeqs = async (name: string, initialArguments: Record<string, unknown>): Promise<number[]> => {
+      const seqs: number[] = []
+      let args: Record<string, unknown> = { ...initialArguments, max_results: 1 }
+      for (;;) {
+        const response = await s.handleMessage({ jsonrpc: '2.0', id: seqs.length + 1, method: 'tools/call', params: { name, arguments: args } })
+        const result = response?.result as { isError?: boolean, content: Array<{ text: string }> }
+        assert.equal(result.isError, undefined, result.content[0]?.text)
+        const page = JSON.parse(result.content[0]?.text ?? '') as {
+          next_after_seq?: number
+          rows: Array<{ seq: number }>
+        }
+        seqs.push(...page.rows.map(row => row.seq))
+        if (page.next_after_seq === undefined) return seqs
+        args = { ...args, after_seq: page.next_after_seq }
+      }
+    }
+    assert.deepEqual(await collectSeqs('list-events', {
+      session_id: 'session-sparse-pages', type: 'alpha', turn: 2,
+    }), [4, 5])
+    assert.deepEqual(await collectSeqs('query-events', {
+      session_id: 'session-sparse-pages', filter: { type: 'alpha' },
+    }), [0, 2, 4, 5])
+  })
+})
+
 test('get-token-bill rejects a group_by outside turn/step instead of silently defaulting', async () => {
   await withSessionRoot([primarySession()], async root => {
     const s = server(new SessionStore(root))

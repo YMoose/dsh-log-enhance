@@ -1,3 +1,4 @@
+import { appendFile, writeFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { zstdCompressSync } from 'node:zlib'
@@ -77,8 +78,6 @@ test('session references resolve by exact id or unique suffix, and ambiguity nam
 
 test('parse cache invalidates when the artifact changes on disk', async () => {
   await withSessionRoot([legacySession()], async root => {
-    const { writeFile } = await import('node:fs/promises')
-    const { join } = await import('node:path')
     const store = new SessionStore(root)
     const first = await store.load('-2222')
     assert.equal(first.events.length, 3)
@@ -90,6 +89,29 @@ test('parse cache invalidates when the artifact changes on disk', async () => {
     await writeFile(path, appended)
     const second = await store.load('-2222')
     assert.equal(second.events.length, 4)
+  })
+})
+
+test('reloading an appended session replaces rather than accumulates its cache charge', async () => {
+  await withSessionRoot([legacySession(), primarySession()], async root => {
+    const store = new SessionStore(root, { maxCachedEvents: 25 })
+    const legacy = await store.load('-2222')
+    await store.load('-1111')
+    for (let index = 0; index < 10; index += 1) {
+      await new Promise(resolve => setTimeout(resolve, 2))
+      await appendFile(legacy.listing.path, `${JSON.stringify({ type: 'session/title', seq: 3 + index })}\n`)
+      await store.load('-2222')
+    }
+    const internals = store as unknown as {
+      cachedEvents: number
+      parseCache: Map<string, { parsed: { events: readonly unknown[] } }>
+    }
+    const actual = [...internals.parseCache.values()]
+      .reduce((sum, entry) => sum + entry.parsed.events.length, 0)
+    assert.equal(internals.cachedEvents, actual)
+    assert.equal(internals.cachedEvents, 13)
+    assert.equal(internals.parseCache.size, 1, 'the frequently reloaded session must not evict its peer')
+    assert.equal(internals.parseCache.has(legacy.listing.path), true)
   })
 })
 
