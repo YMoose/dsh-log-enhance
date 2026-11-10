@@ -1,6 +1,6 @@
 {
   "name": "dsh-log-enhance",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Structured runtime evidence and message provenance for DeepSeek Harness logs",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,6 +18,7 @@
     "dist",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "docs"
   ],
