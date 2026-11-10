@@ -1,0 +1,210 @@
+{
+  "generatedAt": "2026-11-10T04:40:08.350Z",
+  "node": "v25.6.1",
+  "packages": {
+    "cordis": {
+      "integrity": "sha512-CJrjNyBkKn1SfvBQUcgFYKFnLjS+uKrhdMsbHU60xabvi12d+xQ+IQSNlME5Z+B+4Zi6n4BDknKY94tEPeo47w==",
+      "version": "4.1.0"
+    },
+    "cordis-plugin-loader": {
+      "integrity": "sha512-154u0LnADauDvOdQ41QtoOrRFQtvP2Ih68aYYaXzI/l7gRPwX/5MDtDDsJWeDffQA3ELn2xt3MUYsyizi+O9KA==",
+      "version": "1.1.0"
+    },
+    "cosmokit": {
+      "integrity": "sha512-5O1S53mZiJyZYcvxxD0Qv1EY7qFPSxbGyD8CbVK6gw7W9FvcXZj2YIX1ZkOqyQQ3Xt2rFkZDHJv0+V3Zmmp8CA==",
+      "version": "1.9.0"
+    },
+    "dsh-agent": {
+      "integrity": "sha512-3zNf9+SRLKkzItWN83OAZtG1M2TO3fPB6vi3w/Z44jiXJioz1WoZJj6qFYHwP57i+8RmMUOWP7OBPpV9m/Sqlw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-agent-loop": {
+      "integrity": "sha512-LsmoSB/wckh2bNVMIKan+6G3QlAYM9Uhthh+9ti6N5AXqFqR7m7gWdEbQ/MWks9DgjWw/EP6x943UBga+TADCA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-agent-loop-testkit": {
+      "integrity": "sha512-G2yyhVAwxWtCA1JOW4J+m9wWpeN2yfFuuqKg/6fvxxqNNXHBse1zC3tPxGTurtnXSrjBOBfO7K3AhMryzNHFQA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-attachment": {
+      "integrity": "sha512-iXw72OnKY95NYN9a6nHse/b4LbTbpgINRV38zk1Q+7K0Qlm1qiMZ2NwGfW9Hz+ch6SBxI6L8NZiFeMnBjSR86A==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-brand": {
+      "integrity": "sha512-ShGNEmNuEQA+bfkspWC2kGrdbrM4dFNhqlrNHIWsHO+PgVH1KoTKTLSraT1pt0A8YYk/moKE0gL2gY9dNBU+rw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-chunked-list": {
+      "integrity": "sha512-j+dDDoMdsMbRzHQ1P6wn1otxDnt6YDUNfGh0SuW5vuCr0nJ3LJHCv2sLdXZFKSyPBIMiQToo5A9sD8ostZaV7g==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-commands": {
+      "integrity": "sha512-k09pXprTPRbSwMzsbt0o0bFuD4RQQgjQ1lusL12zQ9H59FhurJj8yogaEpz35+H6/VTVr6qG20je2pdvZ++DuA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-compaction": {
+      "integrity": "sha512-KWn/GpZ5adrSkS4O6U25gvVdtNG4D8tZ/xdUCsIEftveCJvT4R0s38PPcmIALS92jxHjrrCa6msVanW3lh1S1Q==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-compaction-image-offload": {
+      "integrity": "sha512-xnGqqDYiM1zLqkvuRWzZdXCvjTbE2m1ia8T+T9Xd/LeE+p0yNvru3xjLLcaJdta13mBXldCDiZDXYeA30yy0gw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-fs": {
+      "integrity": "sha512-sbr+u+3dG4KAUdY7FoMLJg/gSE39gvgBMwmvVeR/6acNrlHaIducvnuxRUYAq2V0+NOVnG8fA9sdfBq2uGAfUw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-fs-local": {
+      "integrity": "sha512-tibC9z4YJx7C6DhiWmTc9AYeF+GSh22XVaaDdumwTgBgvFuiNITNGn3E0DTL3skugB3MKnvAvrjybdveNQ7MmQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-fs-patch": {
+      "integrity": "sha512-I9uMZxHl+aB5zHzb4Je8PIT32+BMco6iC6nn0tMGa5SvfwPt8WO0Bj/HZIVqOhZIhVVtNL3aiA6YL/vxPB8dPg==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-llm": {
+      "integrity": "sha512-XeEvH+6bpkjx0E2P1B5ZE+WWa+VHp4DimQaJDKNUZEFouqHMuN1B61TIz6IzUquRxa/6X4yJy+qXQ9WwAeMw5w==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-ptc-runtime": {
+      "integrity": "sha512-kDWLKDgNWLZLp/m/pBsL90yPh2NPzzZjxVk/M4u+Ra3riKtlCwOt3//0eoXC7HExyhKsotjeQY3UyxBehnsVrA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-sandbox": {
+      "integrity": "sha512-rCZHKvyIxbQjYbmZa0LmNomBukrIOLPeecNKs7R0JAbOfixHOXBaSaYrHZa+M0a2hTLqPS73WPEoyto+7yTLNQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-sandbox-policy": {
+      "integrity": "sha512-6wQTMIewCYpw98Mne78a0Muf5Mov5BqvR5RmIx6ifhNCPU6efueL27KuJhrOqNS/BgWrhleNdtn1E9bu+S829w==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-scope": {
+      "integrity": "sha512-FOJbXYvrskIcrb/4eVMMQfp0kaReTSBtIry2KsGNURb0OJfelqeSKaB1MsQQq/sOxbt3nPJIN9HY00SwmrTk3Q==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session": {
+      "integrity": "sha512-e0zx9HFNn8EyqrymGQS85SjKOyr61//ChTgIVDlCBSZvBB723fuXyi9LiHIIuPTlkgmWJl3gm5J51ebEXew7PQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format": {
+      "integrity": "sha512-FGFj2z3Fj1E/OiXwTGF8EpvdU0so6mByohR1crQFiV/DPJ7XwzjdSNNevqLMoNZeaCCvwVmoK4TmggPyv6INsQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format-catalog": {
+      "integrity": "sha512-KuNxsJID39plUYnsq/HHtk0h2Tm7BrzLgQPCTRynTO541xFO7W7RmHPekr1hDDGFbS76omfKN/JV0pCHKuJbpA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format-v0-to-v1": {
+      "integrity": "sha512-93MSPI7CpTm6CTZUnxZKSkgBbK4bhm7cX8leQHoaYKOcMpBD/asuD5bNw9MpKgf2eOhmrZfCO/R5rTtC9oh5Tw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format-v1-to-v2": {
+      "integrity": "sha512-qesNQviPvz1JmY1HajN1CoGHcY1oL0tkCx8rlyH+/BMJdH+NgbeAoP04mdSomGXGb96F/cZdTIM49hEbM4T7EA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format-v2-to-v3": {
+      "integrity": "sha512-rpB50olNFwTrII9V+6l/FyF6EbKrzkizCVeDOQs3QIo/FtGAdzxK40h82ZsdEaV+ln0ylf35oWOnNCD7/tGuSA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-format-v3-to-v4": {
+      "integrity": "sha512-zmIkGb4SW03VxMtWxZmr9t9Q4Bs5mK9APrKJccZMyThdnX/ZFbvE0t/q/AyI/lkhAY9DGf8uPIddl1vIUO8hlg==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-persistence": {
+      "integrity": "sha512-0Pl9K14QKaFARcwdSJTUa0XusXlFYNAnlIdlL9s3AlWIaYOwUO6kp5pw+tcQBD80sTq8dA414j9TTJS6hszovg==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-persistence-jsonl": {
+      "integrity": "sha512-HZTI2tikM6osoH+b6OlDppQYMDy6UVn0/s/XRX3TnvbOgO27FmXMlKy93Ma5GgiqWWugzsqyzruB7t1Y3SPS3Q==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-projection": {
+      "integrity": "sha512-+wGhr1kVdhYv7E355HJUCq+foG1Dt40ehGULCdCxT46we6S1Ie2d1yUH18VvVCsEw0eM1ATe241mx3UCUMDYWQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-query": {
+      "integrity": "sha512-KOFf95Oybp+YVnnmmxQHgwS6x0NqqWpk4G/LqNEo5rRw9FIyv0QoZnYOP+DepVXuw6vM722/uhsTVWb0TsXgTA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-session-title": {
+      "integrity": "sha512-v8qHB0FIN6Fgc/YuXk3HYfC03/yndLj76J1VSEmdI0Jn+lb8IAQ+uryrRmDBdyx91b6w3HikczsBJM4/r5ZpQQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-subagent": {
+      "integrity": "sha512-UeWI8SlxUgPvIwv0ABo/5UauOAC6NyfE8V4sUUkUSqYpZ6I+Des4eI0NTasDf7+bF4Q6/5AIjZczvusWZ3O4wQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-subagent-fork-in-process": {
+      "integrity": "sha512-rm6QvxdX2I2adVrN8nXNOcU8v8DnpQ0UAoiWUy+ogbPCNtyIYVMoxUa6p3jicPTbwkx53GBb2NY4KPmgFaPfeA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-subagent-spawn-in-process": {
+      "integrity": "sha512-POmSdiPjE00iEV9kndQ5yrj4Rkg2H1PcVAXQ9F7PBqe858UuTf8m6nASHPufiw9oMBeIIN7+I8Oj9YaN/z+A3A==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-system-prompt": {
+      "integrity": "sha512-1p9imdrenPnJTkLb6Coq+ELBDjngblM/YGP1Pa/xf1oisjLHcCoK2n9kkOUTIfgvoFtqWfxZJNZeKef71ZmlrA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-timeout": {
+      "integrity": "sha512-dn5eQbPjdQIH2WrVXyQjxgsxkB006+O8OhclMQZtIZnUjWaqxtBmot0wSdyrPxrULyXxiHmmdRCeLruZBO0n0Q==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-tool-executor-native": {
+      "integrity": "sha512-GOpzjU0igQpQKTnup7lg6Vn1275yn8vcVAli0S7y1ZnkIMucsmcKTEY/tT0dPR3Bg1gca+XRcFidWKjuxVTfPw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-tool-executor-ptc": {
+      "integrity": "sha512-IXV0NUknOav/Nb0gC441+496q+gIil0/+Q/rPBzP3KopU/0GdDdvq18/O8QIo1Eix5DoXXS3cyiUjadc491ukg==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-tool-subagent-control": {
+      "integrity": "sha512-UsJRZpjwpo8Y/HG7yMZvmXHCVCcwBEC/7EF6LbeayNuwPIUsbmuOD4vzZleULZs6SYLn3ywjthuUPG31WB+HKQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-tool-todo": {
+      "integrity": "sha512-APubdzuWEL+9mXwKe7OCiHMAN8wPzOpWPXo5viB43ykMCrjwyoprf3cSZjrwhIGuUDEhUz3dGWKQHq78rbuURA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-tools": {
+      "integrity": "sha512-svB49dLPCHkKHgGwik3dTvEH0sL1vKwIzlQgqjE4qzEqFbSEROW8fByk3g2y2lxDv8TqgEUa0Vp2qFrVbm2lfw==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-typert-protocol": {
+      "integrity": "sha512-TrasPUFkoUafa9gAALMRYy2skAiM1nQ9qmmbgWF8FyHyIQsMTK4BTW8g4JcRnS0+y9YTIk2OytRT2ps9NGzI9A==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-user-approval": {
+      "integrity": "sha512-zH3TXxkzwIxIlHZfqqjv/lzDr/kOGkKk3BHPEwkyRyaJNi+dx68LiMgmzylYBVziHgqyGtYcYmbOutGCzJoCUA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-util-crypto": {
+      "integrity": "sha512-I9Nhh3/64HPzjdR/mUt0J534FYHgodMUe0coXtA91+kxGcJQcSHOYouewv4hf0NWw0BuLh5zihTdtldZtobOWA==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-util-time": {
+      "integrity": "sha512-41h2iC0vuNncEYCCa/C+NcPaHk6157Xaih1ldVveTkbD2jCFvzDIyFz6kDaV4xtR5GicCiR4X1XXVBvzohCNaQ==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-util-values": {
+      "integrity": "sha512-UN4B/Fa9zAunYN3UuXDQ3QknxF/lMKNwTu2WxXKKEC+Ejz745po7I/JmsVFVa7+socfuwwTmVrfSsddRVU+lew==",
+      "version": "0.2.2-rc.1"
+    },
+    "dsh-working-directory": {
+      "integrity": "sha512-z0K5TEUz755hk6HL82IFjFosVge3J9jGUlDved7ZlJ4TKylC09psP/BrVit9L28HCNnyWNO525jt7G9bv0/XNA==",
+      "version": "0.2.2-rc.1"
+    },
+    "node-addon-system": {
+      "integrity": "sha512-EFn8K+mXIXiw6s3rxX+cgp2hZTEAQdVIsURhrXnBxycSXvtQ1EQpsSVzoNKtKAQI0I0VqkEcVEjHzS/PeaGsvw==",
+      "version": "0.1.2"
+    },
+    "node-addon-system-linux-x64": {
+      "integrity": "sha512-S2aPVHvYCpNCppCFyNlooMYuTB7ucK5lvD9oXQQ42v5Z2s5AoaiCdjz9r2l+ED2rI5oS1x0cUZmKjJH2dxV0pg==",
+      "version": "0.1.2"
+    },
+    "schemastery": {
+      "integrity": "sha512-bDXoYQa7ghAhmdYD5VPlzKxEzJV/aKkz5l4V5h1u06z8GAPN1ROewSjvR9WiXhpa52E9fng8lpH5QdCRIQgnyQ==",
+      "version": "3.19.0"
+    }
+  }
+}
