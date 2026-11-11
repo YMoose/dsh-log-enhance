@@ -1,0 +1,398 @@
+{
+  "packages": {
+    "@deepseek-ai/cordis": {
+      "declaredIn": [
+        "peerDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [
+            "src/index.ts"
+          ],
+          "value": []
+        },
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts",
+            "tests/integration/mcp-mount.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/cordis-plugin-loader": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-agent": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [
+            "src/observer.ts"
+          ],
+          "value": []
+        }
+      }
+    },
+    "@deepseek-ai/dsh-agent-loop": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts",
+            "tests/integration/mcp-mount.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-agent-loop-testkit": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts",
+            "tests/integration/mcp-mount.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-app-boot": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "scripts": {
+          "type": [],
+          "value": [
+            "scripts/check-compat.mjs"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-llm": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [
+            "tests/integration/harness.test.ts"
+          ],
+          "value": [
+            "tests/integration/harness.test.ts",
+            "tests/integration/mcp-mount.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-session": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [
+            "src/observer.ts"
+          ],
+          "value": []
+        },
+        "tests": {
+          "type": [
+            "tests/integration/harness.test.ts"
+          ],
+          "value": [
+            "tests/integration/harness.test.ts",
+            "tests/integration/mcp-mount.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-session-persistence-jsonl": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-session-query": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-subagent": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [
+            "src/observer.ts"
+          ],
+          "value": []
+        },
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-subagent-fork-in-process": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-subagent-spawn-in-process": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-tool-subagent-control": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "tests": {
+          "type": [],
+          "value": [
+            "tests/integration/harness.test.ts"
+          ]
+        }
+      }
+    },
+    "@deepseek-ai/dsh-tools": {
+      "declaredIn": [
+        "devDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [
+            "src/observer.ts"
+          ],
+          "value": []
+        }
+      }
+    },
+    "@deepseek-ai/schemastery": {
+      "declaredIn": [
+        "peerDependencies"
+      ],
+      "roots": {
+        "src": {
+          "type": [],
+          "value": [
+            "src/index.ts"
+          ]
+        }
+      }
+    }
+  },
+  "srcHooks": [
+    {
+      "event": "agent/inbox/claimed",
+      "via": "on",
+      "params": [
+        "{ agent, message, turn }"
+      ]
+    },
+    {
+      "event": "agent/inbox/discarded",
+      "via": "on",
+      "params": [
+        "{ agent, message }"
+      ]
+    },
+    {
+      "event": "agent/inbox/inserted",
+      "via": "on",
+      "params": [
+        "{ agent, message }"
+      ]
+    },
+    {
+      "event": "session/event",
+      "via": "on",
+      "params": [
+        "session",
+        "event"
+      ]
+    },
+    {
+      "event": "tools/pre-execute",
+      "via": "on",
+      "params": [
+        "exec",
+        "next"
+      ]
+    },
+    {
+      "event": "tools/result",
+      "via": "on",
+      "params": [
+        "exec",
+        "result"
+      ]
+    }
+  ],
+  "testHooks": [
+    {
+      "event": "agent/pre-step",
+      "via": "on",
+      "params": [
+        "payload",
+        "next"
+      ]
+    },
+    {
+      "event": "session/event",
+      "via": "on",
+      "params": [
+        "session",
+        "event"
+      ]
+    },
+    {
+      "event": "tools/post-execute",
+      "via": "on",
+      "params": [
+        "exec",
+        "_result",
+        "next"
+      ]
+    }
+  ],
+  "ctxAccesses": {
+    "agentLoop": [
+      "tests/integration/harness.test.ts"
+    ],
+    "effect": [
+      "src/index.ts"
+    ],
+    "fiber": [
+      "tests/integration/harness.test.ts",
+      "tests/integration/mcp-mount.test.ts"
+    ],
+    "llm": [
+      "tests/integration/harness.test.ts"
+    ],
+    "loader": [
+      "tests/integration/harness.test.ts"
+    ],
+    "logger": [
+      "src/index.ts",
+      "tests/integration/mcp-mount.test.ts"
+    ],
+    "mcpManager": [
+      "src/index.ts"
+    ],
+    "on": [
+      "src/index.ts",
+      "tests/integration/harness.test.ts"
+    ],
+    "plugin": [
+      "tests/integration/harness.test.ts",
+      "tests/integration/mcp-mount.test.ts"
+    ],
+    "provide": [
+      "tests/integration/mcp-mount.test.ts"
+    ],
+    "subagents": [
+      "tests/integration/harness.test.ts"
+    ]
+  },
+  "fieldPaths": {
+    "@deepseek-ai/cordis": [
+      "effect",
+      "logger",
+      "logger.info",
+      "logger.warn",
+      "on"
+    ],
+    "@deepseek-ai/dsh-agent": [
+      "id",
+      "session"
+    ],
+    "@deepseek-ai/dsh-session": [
+      "data",
+      "data.callId",
+      "data.id",
+      "data.inserted",
+      "data.name",
+      "data.source",
+      "data.source.kind",
+      "data.source.senderSessionId",
+      "data.step",
+      "data.turn",
+      "firstLiveSeq",
+      "header",
+      "header.version",
+      "id",
+      "isOwnSeq",
+      "seq",
+      "sourceEventSeqs",
+      "surfaceOp",
+      "type"
+    ],
+    "@deepseek-ai/dsh-tools": [
+      "agent",
+      "agent.id",
+      "agent.session",
+      "callId",
+      "isError",
+      "name",
+      "parent",
+      "value",
+      "value.messageId",
+      "value.messageId.length"
+    ]
+  }
+}

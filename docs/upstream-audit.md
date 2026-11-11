@@ -5,6 +5,25 @@
 [使用说明](runtime.md)。其他接口结论仍按静态核查理解。
 链接固定到该提交；后续升级应重新核查，而非把这些行为假定为永久契约。
 
+## 0. 耦合面分层总览
+
+2026-11-11 增。本项目与上游的耦合分四层，层号越低越机械、越高越语义。
+层 0/1/3 的机械清单由 `scripts/analyze-dsh-coupling.mjs` 从 AST 生成并固化在
+`coupling.json`（CI 以 `--check` 做漂移门禁：新增 hook、value import 或字段读取
+必须是有意识的同步更新）；层 2 是意图而非代码形状，无法脚本盘点，靠本文章节
+与人工维护。
+
+| 层 | 内容 | 事实来源 | 守护机制 |
+|---|---|---|---|
+| 层 0 · npm 包面 | 16 个 `@deepseek-ai/*`；src 唯一运行时 value import 是 schemastery，其余 type-only（编译期擦除） | `coupling.json` | CI coupling 门禁；`verbatimModuleSyntax` 强制 type import 显式 |
+| 层 1 · 进程内契约 | 6 个 `ctx.on` hook（§1–§3）、`ctx.mcpManager.register`（§8）、observer 的 payload 字段读取面（`data.*`、`sourceEventSeqs`、`value.messageId` 等） | `coupling.json`（hook/服务/字段自动提取） | integration 测试 + coupling 门禁；字段**语义**（回执、生命周期顺序，§2–§3）仍人工核查 |
+| 层 2 · 进程外契约（盘上格式） | 目录布局与 projectKey 编码、zstd 拼接帧容器、头行 schema、事件 JSON 形状（usage/content blocks/source）、`started subagent <id>` 文本协议 | 本文 + `tests/mcp-store.test.ts`、`tests/mcp-analysis.test.ts` | 测试是唯一门禁；上游改格式时这些测试先红 |
+| 层 3 · 验证契约 | tests 借用的 harness 面：testkit、`startActivation` spec 形状、`LlmAdapter`、loader | `coupling.json`（tests 触点与仅 tests 引用的包清单） | 编译期 TS 错误即第一信号——canary 的传感器面 |
+
+读法：`coupling.json` 回答"代码今天耦合什么"，本文各节回答"契约是什么、证据在哪"。
+交叉点是重验流程（[versioning.md](versioning.md) §5）：canary 红 → 按红点路由到本文
+对应节重核 → 修复后 `--write` 固化新的耦合事实。
+
 ## 1. 日志、运行时通知与工具结果
 
 | 接口或记录 | 已核实的含义 | 对本项目的影响 |

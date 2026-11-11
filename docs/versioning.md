@@ -130,6 +130,30 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
 - **定位**：兼容性**证据生成器**（跑矩阵 → 更新声明与带日期的证据文档），
   不做门禁。官方插件市场若落地，过滤依赖兼容声明，证据生成器是其上游而非竞争者。
 
+### 其他插件仓库如何接入这套机制
+
+以模式传播，不立项：配方把接入成本压到"复制文件 + 一次手动验证"。前三步是前提，
+没有它们，抄走的 CI 只会永远绿——绿灯变成空话：
+
+1. **地基**：提交 lockfile，CI 用 `npm ci`；全部 `@deepseek-ai/*` devDeps 精确版本。
+   （pnpm 仓库需把 baseline 读写适配到 pnpm 的 lockfile 结构，其余不变。）
+2. **声明**：`engines.dsh` 覆盖已验证列车，上界必须带 `-0`（如 `>=0.2.2-rc.1 <0.3.0-0`）；
+   peers 只留真实共享实例的运行时依赖（通常 cordis + schemastery）。
+3. **传感器**：至少一条真的碰宿主 API 的集成测试（hook 或读盘格式）。这是唯一
+   不能抄的部分——测试存在，门禁与 canary 才有意义。
+4. **复制五个文件 + 两个 workflow**：`scripts/bump-upstream.mjs`（跟上游，dist-tag
+   陷阱编码在头部注释）、`scripts/write-baseline.mjs` + `tests/baseline.test.ts`
+   （钉安装内容，防同版本重发布）、`scripts/check-compat.mjs`（官方兼容门自检）、
+   `scripts/analyze-dsh-coupling.mjs`（默认模式出自家耦合草表，`--write` 固化）、
+   `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
+   第三方 action 一律 SHA pin；checker 步的 `dshVersion` 对齐自家验证线。
+   接入后手动 `workflow_dispatch` 跑一次 canary，链路通了才算闭环。
+
+随配方一起迁移的两条纪律：**三处同步**（engines.dsh 下界 = checker `dshVersion` =
+baseline 指纹，一起改）；**重验流程**（baseline/coupling 红了走 §5 重核上游契约，
+不是重写文件让它变绿）。耦合草表的层 2 部分（读盘格式与语义契约）各家不同，
+照 [upstream-audit.md](upstream-audit.md) §0 的分层体例手写。
+
 ## 7. 证据索引（2026-11-10 调研）
 
 - 官方插件发布规范（engines.dsh / peers 约定）：

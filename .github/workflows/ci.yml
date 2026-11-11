@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   check:
-    name: typecheck, tests, build, compat gate, pack smoke
+    name: typecheck, tests, build, compat gate, coupling gate, pack smoke
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -36,6 +36,12 @@ jobs:
 
       - name: Run the official dsh compatibility gate on the plugin manifest
         run: npm run check:compat
+
+      # Coupling drift gate: a new hook, value import, or payload field read
+      # must be a conscious update of coupling.json — the same semantics as
+      # the baseline integrity gate, applied to the source coupling surface.
+      - name: Gate the coupling inventory against coupling.json
+        run: node scripts/analyze-dsh-coupling.mjs --check
 
       - name: Pack the publishable tarball
         run: npm pack --pack-destination "$RUNNER_TEMP"
