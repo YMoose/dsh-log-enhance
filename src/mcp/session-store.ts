@@ -353,6 +353,8 @@ export class SessionStore {
         lastModifiedMs: fileStat.mtimeMs,
       },
     }
+    const previous = this.parseCache.get(listing.path)
+    if (previous !== undefined) this.cachedEvents -= previous.parsed.events.length
     this.parseCache.delete(listing.path)
     while (this.cachedEvents + body.events.length > this.maxCachedEvents && this.parseCache.size > 0) {
       const oldest = this.parseCache.keys().next()

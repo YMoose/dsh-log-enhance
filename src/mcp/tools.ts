@@ -83,11 +83,14 @@ async function loadSession(store: SessionStore, sessionRef: string): Promise<Par
 function eventsResult(events: readonly SessionEvent[], matched: number, maxResults: number): Record<string, unknown> {
   const slice = events.slice(0, maxResults)
   const last = slice.at(-1)
-  const nextFromSeq = slice.length < matched && last?.seq !== undefined ? last.seq + 1 : undefined
+  // Resume strictly after the last returned match. Filtering before pagination
+  // is essential: restarting from a seq range and filtering afterwards would
+  // spend the page budget on non-matches and can starve later matches.
+  const nextAfterSeq = slice.length < matched && last?.seq !== undefined ? last.seq : undefined
   return {
     matched,
     returned: slice.length,
-    ...(nextFromSeq === undefined ? {} : { next_from_seq: nextFromSeq }),
+    ...(nextAfterSeq === undefined ? {} : { next_after_seq: nextAfterSeq }),
     rows: slice.map(eventRow),
   }
 }
@@ -98,6 +101,7 @@ function eventMatches(event: SessionEvent, filters: {
   step: number | undefined
   fromSeq: number | undefined
   toSeq: number | undefined
+  afterSeq: number | undefined
 }): boolean {
   if (filters.type !== undefined && event.type !== filters.type) return false
   if (filters.turn !== undefined || filters.step !== undefined) {
@@ -106,10 +110,11 @@ function eventMatches(event: SessionEvent, filters: {
     if (filters.step !== undefined && data?.['step'] !== filters.step) return false
   }
   if (event.seq === undefined) {
-    if (filters.fromSeq !== undefined || filters.toSeq !== undefined) return false
+    if (filters.fromSeq !== undefined || filters.toSeq !== undefined || filters.afterSeq !== undefined) return false
   } else {
     if (filters.fromSeq !== undefined && event.seq < filters.fromSeq) return false
     if (filters.toSeq !== undefined && event.seq > filters.toSeq) return false
+    if (filters.afterSeq !== undefined && event.seq <= filters.afterSeq) return false
   }
   return true
 }
@@ -194,8 +199,8 @@ export function analysisTools(): ToolSpec[] {
     {
       name: 'list-events',
       description: 'List event rows of one session with one-line previews. Filters: event type, turn, '
-        + 'step, seq range (from_seq/to_seq inclusive). Rows carry raw epoch-ms times. Use '
-        + 'next_from_seq for continuation. Default max_results 50, cap 500.',
+        + 'step, seq range (from_seq/to_seq inclusive), or after_seq (exclusive). Rows carry raw '
+        + 'epoch-ms times. Continue filtered pages with next_after_seq. Default max_results 50, cap 500.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -205,6 +210,7 @@ export function analysisTools(): ToolSpec[] {
           step: { type: 'number' },
           from_seq: { type: 'number' },
           to_seq: { type: 'number' },
+          after_seq: { type: 'number', description: 'Return only events with seq greater than this value' },
           max_results: { type: 'number' },
         },
         required: ['session_id'],
@@ -217,6 +223,7 @@ export function analysisTools(): ToolSpec[] {
           step: optionalNumber(args, 'step'),
           fromSeq: optionalNumber(args, 'from_seq'),
           toSeq: optionalNumber(args, 'to_seq'),
+          afterSeq: optionalNumber(args, 'after_seq'),
         }
         const matched = parsed.events.filter(event => eventMatches(event, filters))
         return eventsResult(matched, matched.length, clampMax(args, 'max_results', 50, 500))
@@ -299,12 +306,14 @@ export function analysisTools(): ToolSpec[] {
         + 'filter maps dotted paths to expected values, compared by structural equality '
         + '(object key order is irrelevant, array order is significant), e.g. '
         + '{"type": "tool/call", "data.name": "read"} or {"data.turn": 2}. Missing paths never match. '
-        + 'Rows are the same shape as list-events. Default max_results 50, cap 500.',
+        + 'Rows are the same shape as list-events. Continue filtered pages with next_after_seq. '
+        + 'Default max_results 50, cap 500.',
       inputSchema: {
         type: 'object',
         properties: {
           session_id: ref,
           filter: { type: 'object', description: 'Dotted path → expected value (structural equality)' },
+          after_seq: { type: 'number', description: 'Return only events with seq greater than this value' },
           max_results: { type: 'number' },
         },
         required: ['session_id', 'filter'],
@@ -316,7 +325,10 @@ export function analysisTools(): ToolSpec[] {
           throw new ToolError('"filter" must be an object of dotted path → expected value')
         }
         const maxResults = clampMax(args, 'max_results', 50, 500)
-        const matched = parsed.events.filter(event => matchesFilter(event, filter as Record<string, unknown>))
+        const afterSeq = optionalNumber(args, 'after_seq')
+        const matched = parsed.events.filter(event =>
+          (afterSeq === undefined || (event.seq !== undefined && event.seq > afterSeq))
+          && matchesFilter(event, filter as Record<string, unknown>))
         return eventsResult(matched, matched.length, maxResults)
       },
     },
