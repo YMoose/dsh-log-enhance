@@ -26,6 +26,21 @@ dsh plugin --profile headless add ./dsh-log-enhance-0.1.0.tgz
 `link:harness` 只在本项目的 node_modules 内创建链接；不会执行 Harness 构建、修改其代码或配置。
 Harness 的准备步骤以其自身文档为准。项目当前没有发布到 npm registry。
 
+建链前会跑三层审计，**全部只告警、不失败**——开发者可能有意探测旧 checkout：
+
+| 层 | 检查 | 数据来源 |
+|---|---|---|
+| 版本字符串 | checkout 包版本 vs `devDependencies` 精确 pin；根版本 vs 列车 | `package.json` |
+| 耦合清单 | 本仓库读取的上游面是否有**代码层**漂移 | `coupling.json`（CI 另有 `--check` 门禁） |
+| API 契约 | `coupling.json` 记录的 type / 字段路径 / `ctx` 服务 / 事件是否仍存在于 checkout 的 `.d.ts` | TypeScript 编译器 API |
+
+第三层是本仓库唯一能发现"版本号相同、耦合清单没变，但成员已被删除"的检查：它把清单里的
+每条记录解析到 checkout 自己发布的声明文件上。字段路径跨过不透明载荷（`JsonValue`、
+`Record<string, unknown>`）时判为**不可验证**而非缺失——那只是记录粒度不足，不是漂移。
+`coupling.json` 不含每字段的归属类型，因此 `fieldPaths` 只按"该首段属性仍出现在该包某个导出类型上"
+校验：能发现删除，不保证能发现改型。`--skip-contracts` 跳过这一层（解析声明约需 1 秒）；
+`DSH_LOG_ENHANCE_COUPLING` 可指向替身清单，供回归测试使用。
+
 包内 `dsh.bundle.patch` 指向 `cordis.patch.yml`，包含 `dsh-log-enhance` 插件行。
 在目标 profile 的 patch 中替换该行配置，例如：
 

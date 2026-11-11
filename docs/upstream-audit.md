@@ -24,6 +24,12 @@
 交叉点是重验流程（[versioning.md](versioning.md) §5）：canary 红 → 按红点路由到本文
 对应节重核 → 修复后 `--write` 固化新的耦合事实。
 
+层 0/1/3 的清单是**快照**：它能发现本侧新增耦合，却无法发现清单里记录的上游面已被上游删掉
+（快照里那条记录本身不会变）。`scripts/link-harness.mjs` 的契约审计补上这半边：建链前用
+TypeScript 编译器 API 把 `coupling.json` 的 type / 字段路径 / `ctx` 服务 / 事件解析到
+checkout 对应的 `.d.ts` 上，缺失即告警。它和版本字符串审计、coupling 漂移门禁是三层互补
+防线，均只告警不失败；详见 [runtime.md](runtime.md#安装与配置)。
+
 ## 1. 日志、运行时通知与工具结果
 
 | 接口或记录 | 已核实的含义 | 对本项目的影响 |
