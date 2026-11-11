@@ -442,6 +442,21 @@ function callArguments(argsText: string): Record<string, unknown> | undefined {
   }
 }
 
+/**
+ * The recipient of a `send_message` call. The upstream tool schema changed
+ * between 0.2.2-rc.1 republishes (`target` → `agent_id`), and some builds emit
+ * `agent`; all three name the same thing, so read the first string in that
+ * order rather than reporting an unknown target for the current schema.
+ */
+function messageTarget(args: Record<string, unknown> | undefined): string | undefined {
+  if (args === undefined) return undefined
+  for (const key of ['target', 'agent_id', 'agent']) {
+    const value = args[key]
+    if (typeof value === 'string') return value
+  }
+  return undefined
+}
+
 /** Extract `started subagent <id>` acknowledgment text from a tool result event's data. */
 function startedSubagentText(data: Record<string, unknown>): string | undefined {
   const message = asRecord(data['message'])
@@ -499,7 +514,7 @@ export function collaborations(parsed: ParsedSession): CollaborationRow[] {
           turn: call.turn,
           step: call.step,
           time: event.time,
-          target: typeof args?.['target'] === 'string' ? args['target'] : undefined,
+          target: messageTarget(args),
           message_chars: typeof args?.['message'] === 'string' ? (args['message'] as string).length : undefined,
           is_error: false,
           duration_ms: null,

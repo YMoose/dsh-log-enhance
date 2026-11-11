@@ -75,6 +75,36 @@ test('collaborations join dispatch, child session, and settlement by native iden
   assert.equal(send?.duration_ms, 3_000) // t5 → t8
 })
 
+test('send_message targets are recognized across upstream schema variants', async () => {
+  // The upstream tool schema changed across 0.2.2-rc.1 republishes: some builds
+  // emit `target`, others `agent_id` (the current schema) or `agent`. All three
+  // name the same thing — the recipient — so the analysis must read them all
+  // rather than reporting an unknown target for 81% of real calls.
+  const send = (seq: number, callId: string, args: Record<string, unknown>) => ({
+    type: 'tool/call', seq, time: 1_000 + seq,
+    data: { turn: 1, step: 1, callId, name: 'send_message', arguments: JSON.stringify(args) },
+  })
+  await withSessionRoot([
+    {
+      sessionId: 'session-target-variants',
+      batches: [[
+        send(0, 'c-target', { target: 'lead', message: 'a' }),
+        send(1, 'c-agent-id', { agent_id: 'subagent-7', message: 'bb' }),
+        send(2, 'c-agent', { agent: 'worker', message: 'ccc' }),
+        // No recognizable recipient key: stays unknown rather than guessed.
+        send(3, 'c-unknown', { message: 'dddd' }),
+      ]],
+    },
+  ], async root => {
+    const rows = collaborations(await new SessionStore(root).load('session-target-variants'))
+    const targets = new Map(rows.map(row => [row.call_id, row.target]))
+    assert.equal(targets.get('c-target'), 'lead')
+    assert.equal(targets.get('c-agent-id'), 'subagent-7')
+    assert.equal(targets.get('c-agent'), 'worker')
+    assert.equal(targets.get('c-unknown'), undefined)
+  })
+})
+
 test('a settled notice without a local dispatch stays unattributed', async () => {
   await withSessionRoot([
     {
