@@ -69,6 +69,24 @@ test('an underivable upper bound fails instead of skipping the probe', () => {
   assert.doesNotMatch(stdout, /\bok:/)
 })
 
+test('a missing engines.dsh is reported as missing rather than a bare undefined', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-compat-'))
+  try {
+    const manifestPath = join(dir, 'package.json')
+    const manifest = structuredClone(baseManifest) as { engines?: Record<string, string> }
+    delete manifest.engines?.dsh
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    const result = spawnSync(process.execPath, [SCRIPT], {
+      encoding: 'utf8',
+      env: { ...process.env, DSH_LOG_ENHANCE_MANIFEST: manifestPath },
+    })
+    assert.equal(result.status, 1, result.stdout)
+    assert.match(result.stderr, /engines\.dsh is missing from package\.json/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a parseable range that admits its own past-upper prerelease still fails', () => {
   // Both probes derive here, yet the `||` alternative re-admits
   // `0.3.0-alpha.1`. This proves the boundary assertions still actually run

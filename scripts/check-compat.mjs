@@ -77,7 +77,10 @@ function failUnparseableRange(range, probe, regex, expectation) {
   console.error(
     'FAIL cannot derive the engines.dsh boundary probe from the declared range:',
   )
-  console.error(`  range:        ${JSON.stringify(range)}`)
+  if (typeof range !== 'string') {
+    console.error('  engines.dsh is missing from package.json (or is not a string)')
+  }
+  console.error(`  range:        ${JSON.stringify(range) ?? String(range)}`)
   console.error(`  probe wanted: ${probe}`)
   console.error(`  expected:     ${expectation}`)
   console.error(`  regex:        ${regex}`)
