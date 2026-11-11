@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * Regression cover for the compatibility gate's boundary probes.
@@ -17,7 +18,7 @@ import { join } from 'node:path'
  * package.json is never mutated.
  */
 
-const SCRIPT = new URL('../../scripts/check-compat.mjs', import.meta.url)
+const SCRIPT = fileURLToPath(new URL('../../scripts/check-compat.mjs', import.meta.url))
 
 const baseManifest = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -30,7 +31,7 @@ function runWithRange(range: string): { status: number | null; stdout: string; s
     const manifest = structuredClone(baseManifest)
     manifest.engines = { ...manifest.engines, dsh: range }
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-    const result = spawnSync(process.execPath, [SCRIPT.pathname], {
+    const result = spawnSync(process.execPath, [SCRIPT], {
       encoding: 'utf8',
       env: { ...process.env, DSH_LOG_ENHANCE_MANIFEST: manifestPath },
     })
