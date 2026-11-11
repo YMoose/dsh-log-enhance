@@ -15,12 +15,16 @@
  * baseline.json, so this script has no version number of its own to maintain.
  *
  * Exit 0: compatible (and declared range admits its own lower bound while
- * rejecting the first prerelease past its upper bound). Exit 1: not.
+ * rejecting the first prerelease past its upper bound). Exit 1: not — and also
+ * exit 1 when either boundary probe cannot be derived from the range text, so a
+ * range rewrite can never turn these assertions into silent no-ops.
  *
  * @module dsh-log-enhance/scripts/check-compat
  */
 
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import {
   evaluatePluginCompatibility,
@@ -28,7 +32,14 @@ import {
   pluginCompatibilityWarning,
 } from '@deepseek-ai/dsh-app-boot'
 
-const MANIFEST_URL = new URL('../package.json', import.meta.url)
+/**
+ * The manifest under test. `DSH_LOG_ENHANCE_MANIFEST` overrides the path so
+ * the regression tests can feed deliberately malformed ranges without editing
+ * the real package.json.
+ */
+const MANIFEST_URL = process.env.DSH_LOG_ENHANCE_MANIFEST
+  ? pathToFileURL(resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_MANIFEST))
+  : new URL('../package.json', import.meta.url)
 
 /** Render an issue with both the official human diagnostic and the raw record. */
 function detail(issue) {
@@ -36,14 +47,46 @@ function detail(issue) {
 }
 
 /**
+ * The two shapes the probe below can decompose. Kept as named constants so a
+ * failure report can print the exact expression that stopped matching.
+ */
+const LOWER_BOUND_RE = /^\s*>=\s*(\S+)/
+const UPPER_BOUND_ZERO_RE = /<\s*(\d+\.\d+\.\d+)-0\s*$/
+
+/**
  * Derive boundary probes from the declared range itself (single source of
  * truth): the `>=` lower bound, and the first prerelease past a `<X.Y.Z-0`
  * upper bound — the exact spelling the gate must reject per §2.
+ *
+ * Returns `null` for a bound it cannot decompose. Callers must treat that as a
+ * hard failure: a range the gate cannot read is a range nobody has verified,
+ * and skipping the probe would leave the gate green on an unchecked claim.
  */
 function boundaryProbes(range) {
-  const lower = /^\s*>=\s*(\S+)/.exec(range)?.[1] ?? null
-  const upperBase = /<\s*(\d+\.\d+\.\d+)-0\s*$/.exec(range)?.[1] ?? null
+  const lower = LOWER_BOUND_RE.exec(range)?.[1] ?? null
+  const upperBase = UPPER_BOUND_ZERO_RE.exec(range)?.[1] ?? null
   return { lower, firstPastUpper: upperBase ? `${upperBase}-alpha.1` : null }
+}
+
+/**
+ * Abort when a boundary probe cannot be derived from `engines.dsh`. Never fall
+ * back to a skip: these probes are the only thing proving the declared range
+ * text means what docs/versioning.md §2 documents.
+ */
+function failUnparseableRange(range, probe, regex, expectation) {
+  console.error(
+    'FAIL cannot derive the engines.dsh boundary probe from the declared range:',
+  )
+  console.error(`  range:        ${JSON.stringify(range)}`)
+  console.error(`  probe wanted: ${probe}`)
+  console.error(`  expected:     ${expectation}`)
+  console.error(`  regex:        ${regex}`)
+  console.error(
+    'If the range syntax changed on purpose, update boundaryProbes() here and ' +
+      'docs/versioning.md §2 together — the boundary assertions must never be ' +
+      'silently skipped.',
+  )
+  process.exit(1)
 }
 
 const manifest = JSON.parse(readFileSync(MANIFEST_URL, 'utf8'))
@@ -62,29 +105,39 @@ if (baselineIssue) {
 //    verified lower bound and rejects the first prerelease past its upper
 //    bound (a bare `<0.3.0` would silently admit `0.3.0-alpha.1`).
 const { lower, firstPastUpper } = boundaryProbes(manifest.engines.dsh)
-if (lower) {
-  const lowerIssue = evaluatePluginCompatibility(manifest, {}, lower)
-  if (lowerIssue) {
-    console.error(`FAIL ${label} rejects its own lower bound ${lower}:`)
-    console.error(detail(lowerIssue))
-    process.exit(1)
-  }
-} else {
-  console.log('note: engines.dsh lower bound not machine-derivable, probe skipped')
+if (!lower) {
+  failUnparseableRange(
+    manifest.engines.dsh,
+    'lower bound',
+    LOWER_BOUND_RE,
+    'a leading `>=<version>` term, e.g. `>=0.2.2-rc.1 <0.3.0-0`',
+  )
 }
-if (firstPastUpper) {
-  const pastUpperIssue = evaluatePluginCompatibility(manifest, {}, firstPastUpper)
-  if (!pastUpperIssue) {
-    console.error(
-      `FAIL ${label} admits ${firstPastUpper}; the upper bound must keep its \`-0\` suffix (docs/versioning.md §2)`,
-    )
-    process.exit(1)
-  }
-} else {
-  console.log('note: engines.dsh upper bound is not `<X.Y.Z-0`, past-upper probe skipped')
+if (!firstPastUpper) {
+  failUnparseableRange(
+    manifest.engines.dsh,
+    'first prerelease past the upper bound',
+    UPPER_BOUND_ZERO_RE,
+    'a trailing `<X.Y.Z-0` term, e.g. `>=0.2.2-rc.1 <0.3.0-0` (docs/versioning.md §2)',
+  )
+}
+
+const lowerIssue = evaluatePluginCompatibility(manifest, {}, lower)
+if (lowerIssue) {
+  console.error(`FAIL ${label} rejects its own lower bound ${lower}:`)
+  console.error(detail(lowerIssue))
+  process.exit(1)
+}
+
+const pastUpperIssue = evaluatePluginCompatibility(manifest, {}, firstPastUpper)
+if (!pastUpperIssue) {
+  console.error(
+    `FAIL ${label} admits ${firstPastUpper}; the upper bound must keep its \`-0\` suffix (docs/versioning.md §2)`,
+  )
+  process.exit(1)
 }
 
 console.log(
   `ok: ${label} passes the official dsh ${runtimeVersion} compatibility gate ` +
-    `(peers short-circuited by engines.dsh; lower bound ${lower ?? '?'} admitted, ${firstPastUpper ?? '?'} rejected)`,
+    `(peers short-circuited by engines.dsh; lower bound ${lower} admitted, ${firstPastUpper} rejected)`,
 )
