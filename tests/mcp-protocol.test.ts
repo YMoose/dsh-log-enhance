@@ -131,6 +131,34 @@ test('list-sessions distinguishes a missing storage root from an empty one', asy
   })
 })
 
+test('list-sessions survives a session whose createdAt is missing or malformed', async () => {
+  // A single corrupt header must not hide every healthy session behind it: before
+  // the fix `new Date(header.createdAt).toISOString()` threw a RangeError for the
+  // whole listing, so `list-sessions` returned an isError result and listed nothing.
+  await withSessionRoot([
+    primarySession(),
+    { sessionId: 'session-no-createdat', batches: [[{ type: 'turn/start', seq: 0, data: { turn: 1 } }]], header: { createdAt: undefined } },
+    { sessionId: 'session-bad-createdat', batches: [[{ type: 'turn/start', seq: 0, data: { turn: 1 } }]], header: { createdAt: 'not-a-number' } },
+  ], async root => {
+    const response = await server(new SessionStore(root))
+      .handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list-sessions', arguments: {} } })
+    const result = response?.result as { isError?: boolean, content: Array<{ text: string }> }
+    assert.equal(result.isError, undefined, result.content[0]?.text)
+    const page = JSON.parse(result.content[0]?.text ?? '{}') as {
+      total: number
+      sessions: Array<{ session_id: string, created_at: string }>
+    }
+    assert.equal(page.total, 3)
+    const healthy = page.sessions.find(row => row.session_id === 'session-aaaa-1111')
+    assert.equal(healthy?.created_at, new Date(1_700_000_500_000).toISOString())
+    for (const id of ['session-no-createdat', 'session-bad-createdat']) {
+      assert.equal(page.sessions.find(row => row.session_id === id)?.created_at, 'unknown')
+    }
+    // Malformed creation times sort last, so a real newest-first ordering survives.
+    assert.equal(page.sessions[0]?.session_id, 'session-aaaa-1111')
+  })
+})
+
 test('stdio loop survives a garbage line and answers everything in order', async () => {
   await withSessionRoot([primarySession()], async root => {
     const input = new PassThrough()

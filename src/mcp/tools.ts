@@ -8,7 +8,7 @@
  * @module dsh-log-enhance/mcp/tools
  */
 
-import { collaborations, eventRow, matchesFilter, summarize, tokenBill } from './analysis.js'
+import { collaborations, eventRow, builtAtMs, isoTimestamp, matchesFilter, summarize, tokenBill } from './analysis.js'
 import { SessionStore } from './session-store.js'
 import type { ParsedSession, SessionEvent, SessionListing } from './session-store.js'
 
@@ -55,7 +55,7 @@ function listingRow(listing: SessionListing): Record<string, unknown> {
   return {
     session_id: listing.sessionId,
     cwd: header.cwd,
-    created_at: new Date(header.createdAt).toISOString(),
+    created_at: isoTimestamp(header.createdAt),
     format_version: listing.formatVersion,
     compressed: listing.compressed,
     parent_session: header.parentSession,
@@ -159,8 +159,15 @@ export function analysisTools(): ToolSpec[] {
         let listings = await store.list()
         listings = listings.filter(listing => {
           if (cwdFilter !== undefined && !(listing.header.cwd ?? '').includes(cwdFilter)) return false
-          if (after !== undefined && listing.header.createdAt < after) return false
-          if (before !== undefined && listing.header.createdAt > before) return false
+          if (after !== undefined || before !== undefined) {
+            // A session whose creation time is unknown cannot be proven to fall
+            // inside the window, so a bounded query excludes it rather than
+            // guessing a position from an unreadable header.
+            const created = builtAtMs(listing)
+            if (created === undefined) return false
+            if (after !== undefined && created < after) return false
+            if (before !== undefined && created > before) return false
+          }
           return true
         })
         if (minEvents !== undefined) {
@@ -171,7 +178,18 @@ export function analysisTools(): ToolSpec[] {
           }
           listings = kept
         }
-        listings = [...listings].sort((a, b) => b.header.createdAt - a.header.createdAt)
+        // Newest first; sessions with an unreadable creation time sort last
+        // (Array#sort is stable, so they keep their discovery order) instead of
+        // poisoning the comparison with NaN.
+        listings = [...listings].sort((a, b) => {
+          const left = builtAtMs(a)
+          const right = builtAtMs(b)
+          if (left === undefined && right === undefined) return 0
+          if (left === undefined) return 1
+          if (right === undefined) return -1
+          return right - left
+        })
+
         return {
           total: listings.length,
           returned: Math.min(maxResults, listings.length),

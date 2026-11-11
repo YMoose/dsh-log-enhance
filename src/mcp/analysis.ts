@@ -8,7 +8,7 @@
  * @module dsh-log-enhance/mcp/analysis
  */
 
-import type { ParsedSession, SessionEvent } from './session-store.js'
+import type { ParsedSession, SessionEvent, SessionListing } from './session-store.js'
 
 /** Billed input = uncached input + both cache legs (fields are disjoint). */
 export interface TokenUsage {
@@ -225,8 +225,21 @@ function percentile(sorted: readonly number[], fraction: number): number {
   return sorted[index] as number
 }
 
-function iso(ms: number | undefined): string {
-  return ms === undefined ? 'unknown' : new Date(ms).toISOString()
+/**
+ * Render an epoch-ms timestamp, or `'unknown'` when the value cannot name an
+ * instant. A persisted `createdAt` is not guaranteed to be a finite number:
+ * `new Date(...).toISOString()` throws `RangeError` on a missing or malformed
+ * value, which in a listing would hide every other session.
+ */
+export function isoTimestamp(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'unknown'
+  return new Date(value).toISOString()
+}
+
+/** A creation time usable for ordering and bounds, or `undefined` when unknown. */
+export function builtAtMs(listing: SessionListing): number | undefined {
+  const value = listing.header.createdAt
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 /** Whole-session picture: counts, tokens, tool distribution, latencies. */
@@ -337,7 +350,7 @@ export function summarize(parsed: ParsedSession): SessionSummary {
     session: defined({
       id: header.id,
       cwd: header.cwd,
-      created_at: iso(header.createdAt),
+      created_at: isoTimestamp(header.createdAt),
       format_version: listing.formatVersion,
       parent_session: header.parentSession,
       delegation_depth: header.delegationDepth,
@@ -346,7 +359,7 @@ export function summarize(parsed: ParsedSession): SessionSummary {
     storage: {
       path: listing.path,
       file_bytes: listing.fileBytes,
-      last_modified: iso(listing.lastModifiedMs),
+      last_modified: isoTimestamp(listing.lastModifiedMs),
       truncated_tail: parsed.truncatedTail,
       events: events.length,
     },
