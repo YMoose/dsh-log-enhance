@@ -195,10 +195,19 @@ async function spawnServer(root: string): Promise<Child> {
     if (closed) return Promise.resolve()
     closed = true
     return new Promise((resolve, reject) => {
-      child.on('exit', code => {
+      let settled = false
+      const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+        if (settled) return
+        settled = true
         if (code === 0) resolve()
-        else reject(new Error(`server exited with ${String(code)}; stderr: ${stderr}`))
-      })
+        else reject(new Error(`server exited with ${String(code ?? signal)}; stderr: ${stderr}`))
+      }
+      // The child can observe EOF before this cleanup runs (for example when a
+      // test runner supplies a short-lived stdin pipe). Check exitCode after
+      // installing the listener so cleanup never waits for an event that was
+      // already emitted.
+      child.once('exit', finish)
+      if (child.exitCode !== null) finish(child.exitCode, child.signalCode)
       child.stdin.end()
     })
   }
