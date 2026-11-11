@@ -17,6 +17,11 @@
 核心区分：兼容声明回答"能在哪装"，验证基线回答"实际在哪验证过"。
 声明可以宽（失效模式温和：gap 降级，不崩溃），事实必须窄（矩阵只记真实跑过的 run）。
 
+> **Status（数据格式轴的 N-1 读者支持）**：未实现。当前 `src/records.ts:102`（`parseObservation`）
+> 只接受 `SCHEMA_VERSION` 精确相等，遇到旧版本直接 `throw new Error('Unsupported observation schema')`。
+> 因此上表"读者支持 N 与 N-1"是 **v2 schema 的目标状态**，不是现状；引入 N-1 兼容前不要据此推断
+> 旧记录可读。已入库记录目前只有 N=1，未发生实际迁移，故该缺口尚未产生运行时影响。
+
 ## 2. 包声明（定案）
 
 ```jsonc
