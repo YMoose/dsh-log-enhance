@@ -1,0 +1,108 @@
+# S2 upstream canary — see docs/versioning.md §4.
+#
+# The daily tripwire is stateless: the committed baseline IS the state. The
+# full canary runs only when the dsh train moved (dist-tag `next`) or a
+# same-version republish refreshed registry publish times after
+# baseline.json's generatedAt — the two signals a version string alone can
+# never show. Monday's backstop runs unconditionally. On green, the uploaded
+# artifact is exactly the revalidation commit of docs/versioning.md §5;
+# following upstream stays a conscious human decision — no auto-PR by design.
+name: canary
+
+on:
+  schedule:
+    - cron: "23 4 * * *" # daily tripwire
+    - cron: "37 4 * * 1" # weekly full backstop (Monday)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  tripwire:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.probe.outputs.changed }}
+    steps:
+      - name: Check out the repository
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        # v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      - name: Probe the registry for train movement or a same-version republish
+        id: probe
+        run: |
+          out=$(node scripts/bump-upstream.mjs --check)
+          echo "$out"
+          changed=$(printf '%s\n' "$out" | sed -n 's/^UPSTREAM_CHANGED=//p')
+          if [ -z "$changed" ]; then
+            echo "probe output missing UPSTREAM_CHANGED; failing loudly instead of guessing" >&2
+            exit 1
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+  canary:
+    needs: tripwire
+    if: >-
+      needs.tripwire.outputs.changed == 'yes'
+      || github.event_name == 'workflow_dispatch'
+      || github.event.schedule == '37 4 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        # v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Resolve the dsh train to the newest published version
+        run: node scripts/bump-upstream.mjs
+
+      - name: Reinstall from the rewritten manifest
+        run: rm package-lock.json && npm install
+
+      - name: Re-anchor the baseline to the freshly installed train
+        # Inside the canary the install is deliberate, so the baseline follows
+        # it here; the committed baseline stays untouched in the repository.
+        run: node scripts/write-baseline.mjs
+
+      - name: Full verification against the new train
+        run: npm run check
+
+      - name: Official compatibility gate against the new train
+        run: npm run check:compat
+
+      - name: Record the resolved train in the run summary
+        run: |
+          {
+            echo '## Upstream canary'
+            echo '```'
+            node scripts/bump-upstream.mjs --print-only
+            echo '```'
+            echo 'Artifact on green = the revalidation commit material of docs/versioning.md §5.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the revalidation material
+        # v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        if: always()
+        with:
+          name: canary-revalidation
+          path: |
+            package.json
+            package-lock.json
+            baseline.json

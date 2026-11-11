@@ -80,7 +80,7 @@ CI 配置本身不是证据）：
 |---|---|---|---|
 | S0 本地基线 | — | lockfile、engines.dsh、版本单源、baseline 机制、修集成测试 | 本文 |
 | S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测 → 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → `npm pack` 产物安装冒烟 | dsh-plugin-checker（**SHA pin + 显式 `dshVersion`**，勿用其默认 latest） |
-| S2 跟随迭代 canary | 周定时 + 信号源 | 脚本把全部 `@deepseek-ai/*` 解析到 npm 最新已发布版（取 `versions` 数组末位，绕开 dist-tag 滞后）→ 删 lockfile 重装 → 全量 check；PR 上 advisory、定时严格；失败上传 lockfile artifact；绿则自动开 PR 更新 baseline + 矩阵 | langfuse `bump-upstream.mjs`（upstream-canary workflow） |
+| S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或同版本重发布**都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` → 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的全部材料，跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
 | S3 多线兼容矩阵 | 新版本发布 / 手动 | 对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆 | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
 
 信号源优先级（S2/S3 触发用）：
