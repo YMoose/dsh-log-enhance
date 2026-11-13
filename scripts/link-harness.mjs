@@ -136,9 +136,14 @@ function auditVersions(rootVersion, loaded, devDeps) {
 //
 //   packages[pkg].types            → the symbol is still exported
 //   packages[pkg].fields[{type,path}] → the path still resolves on that type
-//   fieldPaths[pkg][]              → the path still resolves on some exported type
+//   fieldPaths[pkg][] / fieldPaths[pkg]{} → the path still resolves on some
+//     exported type (the object form adds `rootType` + `sites`; both are read)
 //   ctxAccesses{}                  → `ctx.<name>` still exists on merged `Context`
 //   srcHooks/testHooks[].event     → the event still exists on merged `Events`
+//
+// A segment ending in `[]` (`data.inserted[].source.senderSessionId`) records a
+// `for…of` iteration: the property is resolved, then the path continues on the
+// array's element type.
 //
 // Declarations are resolved through the TypeScript compiler API so mapped,
 // conditional and module-augmented types behave exactly as they do in the real
@@ -309,7 +314,26 @@ function stepTypes(ts, checker, types, name) {
 }
 
 /**
- * Resolve a dotted path on a set of types.
+ * Element types of array-like hops. A recorded `arr[]` step means "the reader
+ * iterated `arr`", so the path continues on what the iteration yields.
+ * @returns {unknown[]} one element type per live array-shaped variant
+ */
+function elementTypes(ts, checker, types) {
+  const found = []
+  for (const type of types) {
+    for (const variant of expandType(ts, checker, type)) {
+      const apparent = checker.getApparentType(variant)
+      const element = checker.getIndexTypeOfType(apparent, ts.IndexKind.Number)
+      if (element !== undefined) found.push(element)
+    }
+  }
+  return found
+}
+
+/**
+ * Resolve a dotted path on a set of types. A segment ending in `[]`
+ * (`data.inserted[].source.kind`) resolves the property and then steps into
+ * the array's element type before continuing.
  * @param {boolean} allowDynamicFirst whether the first segment may cross an
  *   opaque payload (explicit `fields[].path`, which names its owning type).
  * @returns {{ ok: boolean, at?: string, dynamic?: boolean }}
@@ -318,8 +342,9 @@ function resolvePath(ts, checker, types, segments, allowDynamicFirst = false) {
   let current = types
   let dynamic = false
   for (let index = 0; index < segments.length; index++) {
-    const segment = segments[index]
-    const step = stepTypes(ts, checker, current, segment)
+    const segment = String(segments[index])
+    const element = segment.endsWith('[]')
+    const step = stepTypes(ts, checker, current, element ? segment.slice(0, -2) : segment)
     if (step === null) return { ok: false, at: segments.slice(0, index + 1).join('.') }
     if (step.types.length === 0) {
       // Opaque hop: everything below it is unverifiable by construction.
@@ -330,6 +355,13 @@ function resolvePath(ts, checker, types, segments, allowDynamicFirst = false) {
     }
     if (step.dynamic) dynamic = true
     current = step.types
+    if (element) {
+      const elements = elementTypes(ts, checker, current)
+      // A recorded element hop has to land on something iterable: `x[]` on a
+      // scalar is exactly the retyping drift this audit exists to report.
+      if (elements.length === 0) return { ok: false, at: segments.slice(0, index + 1).join('.') }
+      current = elements
+    }
   }
   return { ok: true, dynamic }
 }
@@ -506,7 +538,10 @@ function entryExports(checker, program, entryFile) {
     //    Candidate types are pre-filtered by the first segment so the check stays
     //    linear; the first segment must be a *named* property of some exported
     //    type (an index signature would make every path look present).
-    const paths = coupling.fieldPaths?.[name] ?? []
+    //    The inventory records `path → { rootType, sites }`; the older array
+    //    form is still accepted so an old snapshot is not silently unaudited.
+    const recorded = coupling.fieldPaths?.[name]
+    const paths = Array.isArray(recorded) ? recorded : Object.keys(recorded ?? {})
     if (paths.length > 0) {
       const index = new Map() // first segment → symbols
       for (const symbol of exported.values()) {
@@ -519,9 +554,11 @@ function entryExports(checker, program, entryFile) {
       for (const path of paths) {
         checked++
         const segments = String(path).split('.')
-        const candidates = index.get(segments[0]) ?? []
+        // A `for…of` hop is anchored on the iterated property, not on `items[]`.
+        const anchor = segments[0].endsWith('[]') ? segments[0].slice(0, -2) : segments[0]
+        const candidates = index.get(anchor) ?? []
         if (candidates.length === 0) {
-          warnings.push(`contract: ${name}: field path '${path}' — no exported type declares '${segments[0]}'`)
+          warnings.push(`contract: ${name}: field path '${path}' — no exported type declares '${anchor}'`)
           continue
         }
         const resolved = candidates.some(symbol =>

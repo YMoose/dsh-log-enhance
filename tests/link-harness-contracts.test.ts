@@ -86,6 +86,8 @@ export interface Payload {
     id: string;
     turn: number;
     source: { kind: string; sender?: string };
+    /** Element hop recorded by the analyzer as items[].… */
+    items: Array<{ id: string; source: { kind: string } }>;
     /** Opaque JSON: paths read through this cannot be verified. */
     meta: Record<string, unknown>;
 }
@@ -168,6 +170,79 @@ test('contract audit reports a field path that stops partway through the chain',
     assert.match(result.stderr, /field path 'source\.kind\.nope' does not resolve/)
   }, undefined, couplingOf({
     fieldPaths: { '@deepseek-ai/mock-core': ['source.kind.nope'] },
+  }))
+})
+
+test('contract audit reads the object-shaped fieldPaths the analyzer writes', () => {
+  scenario(({ harness, manifest, coupling }) => {
+    const result = run(harness, manifest, coupling)
+    assert.equal(result.status, 0, result.stderr)
+    assert.doesNotMatch(result.stderr, /warning:/)
+    // Both entries must be audited: the count is the check, not decoration.
+    assert.match(result.stdout, /API contracts: 2 check\(s\)/)
+  }, undefined, couplingOf({
+    fieldPaths: {
+      '@deepseek-ai/mock-core': {
+        'source.kind': { rootType: 'Payload', sites: ['src/index.ts:126'] },
+        'data.turn': { rootType: 'Envelope', sites: ['src/observer.ts:107'] },
+      },
+    },
+  }))
+})
+
+test('contract audit still reports drift recorded in the object shape', () => {
+  scenario(({ harness, manifest, coupling }) => {
+    const result = run(harness, manifest, coupling)
+    assert.match(result.stderr, /warning: contract: @deepseek-ai\/mock-core: field path 'source\.senderId'/)
+  }, undefined, couplingOf({
+    fieldPaths: {
+      '@deepseek-ai/mock-core': {
+        'source.senderId': { rootType: 'Payload', sites: ['src/index.ts:126'] },
+      },
+    },
+  }))
+})
+
+test('contract audit resolves a for-of element hop on the array element type', () => {
+  scenario(({ harness, manifest, coupling }) => {
+    const result = run(harness, manifest, coupling)
+    assert.equal(result.status, 0, result.stderr)
+    assert.doesNotMatch(result.stderr, /warning:/)
+    assert.match(result.stdout, /API contracts: 1 check\(s\)/)
+  }, undefined, couplingOf({
+    fieldPaths: {
+      '@deepseek-ai/mock-core': {
+        'items[].source.kind': { rootType: 'Payload', sites: ['src/observer.ts:112'] },
+      },
+    },
+  }))
+})
+
+test('contract audit reports an element hop that the declaration no longer supports', () => {
+  scenario(({ harness, manifest, coupling }) => {
+    const result = run(harness, manifest, coupling)
+    // `items[]` iterates objects: `source` stops resolving below `items[]`.
+    assert.match(result.stderr, /field path 'items\[\]\.source\.nope' does not resolve/)
+  }, undefined, couplingOf({
+    fieldPaths: {
+      '@deepseek-ai/mock-core': {
+        'items[].source.nope': { rootType: 'Payload', sites: ['src/observer.ts:112'] },
+      },
+    },
+  }))
+})
+
+test('contract audit refuses an element hop on a non-iterable field', () => {
+  scenario(({ harness, manifest, coupling }) => {
+    const result = run(harness, manifest, coupling)
+    // `turn` is a number: `turn[]` is a shape drift, not an opaque payload.
+    assert.match(result.stderr, /field path 'turn\[\]\.length' does not resolve/)
+  }, undefined, couplingOf({
+    fieldPaths: {
+      '@deepseek-ai/mock-core': {
+        'turn[].length': { rootType: 'Payload', sites: ['src/index.ts:1'] },
+      },
+    },
   }))
 })
 
