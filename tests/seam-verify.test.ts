@@ -384,7 +384,6 @@ function generate(): Generated {
   const segments = new Map<string, SeamMeta>()
   const hookNames: string[] = []
   const covered = new Set<string>()
-  const skipped = new Set<string>()
   const mismatched: string[] = []
   let counter = 0
 
@@ -437,7 +436,8 @@ function generate(): Generated {
     if (pkg.startsWith('event:') || pkg === '@deepseek-ai/cordis') continue
     for (const [path, record] of Object.entries(paths)) {
       const key = `${pkg}::${path}`
-      if (key in UNVERIFIABLE) { skipped.add(key); covered.add(key); continue }
+      // 类型上不可证的接触面在 UNVERIFIABLE 里写明理由，由隐性层探针补运行时证据。
+      if (key in UNVERIFIABLE) { covered.add(key); continue }
       const spec = FIELD_SPECS[key]
       if (spec === undefined) continue
       checkRoot(key, spec, record)
@@ -554,7 +554,7 @@ function generate(): Generated {
   // ---- ctx 作用域的字段（只能在 apply 里验证） ----------------------
   for (const [path, record] of Object.entries(COUPLING.fieldPaths['@deepseek-ai/cordis'] ?? {})) {
     const key = `@deepseek-ai/cordis::${path}`
-    if (key in UNVERIFIABLE) { skipped.add(key); covered.add(key); continue }
+    if (key in UNVERIFIABLE) { covered.add(key); continue }
     const spec = FIELD_SPECS[key]
     if (spec === undefined) continue
     checkRoot(key, spec, record)
@@ -951,6 +951,13 @@ const IMPLICIT_DELEGATIONS: Readonly<Record<string, readonly { file: string, tes
       'the newest generation file wins when a directory holds several',
     ],
   }],
+  'mcp-disk-schema-parity': [{
+    file: 'tests/mcp-analysis.test.ts',
+    tests: [
+      'summary counts activity, tokens, tools, and latency from native facts',
+      'collaborations join dispatch, child session, and settlement by native identities',
+    ],
+  }],
   'tool-exec-reference-identity': [{
     file: 'tests/integration/harness.test.ts',
     tests: [
@@ -958,12 +965,31 @@ const IMPLICIT_DELEGATIONS: Readonly<Record<string, readonly { file: string, tes
       'concurrent real senders with identical call ids and payloads keep distinct provenance',
     ],
   }],
+  'send-message-receipt-local': [{
+    file: 'tests/integration/harness.test.ts',
+    tests: ['real AgentLoop and subagent send_message produce a verifiable sidecar relation'],
+  }],
   'inbox-to-surface-lifecycle': [{
     file: 'tests/integration/harness.test.ts',
     tests: [
       'real AgentLoop and subagent send_message produce a verifiable sidecar relation',
       'receiver rejecting pre-step is claimed but never marked admitted',
     ],
+  }],
+  'subagent-settled-surface': [{
+    file: 'tests/mcp-analysis.test.ts',
+    tests: [
+      'collaborations join dispatch, child session, and settlement by native identities',
+      'a settled notice without a local dispatch stays unattributed',
+    ],
+  }],
+  'send-message-arg-schema': [{
+    file: 'tests/mcp-analysis.test.ts',
+    tests: ['send_message targets are recognized across upstream schema variants'],
+  }],
+  'cordis-uninjected-mcp-throws': [{
+    file: 'tests/integration/mcp-mount.test.ts',
+    tests: ['a host without mcpManager applies with a warning while observation continues'],
   }],
   'mcp-jsonrpc-wire': [{
     file: 'tests/mcp-protocol.test.ts',
@@ -980,25 +1006,20 @@ const implicitTitle = (seam: ImplicitSeam): string =>
 for (const seam of IMPLICIT_SEAMS) {
   test(implicitTitle(seam), async (context) => {
     const run = IMPLICIT_RUNS[seam.id]
-    if (run !== undefined) {
-      await run(context)
-      return
-    }
-    if (GENERATED.segments.has(`implicit:${seam.id}`)) {
-      assertSeamClean(`implicit:${seam.id}`)
-      return
-    }
+    const fragment = GENERATED.segments.has(`implicit:${seam.id}`)
     const delegations = IMPLICIT_DELEGATIONS[seam.id]
-    if (delegations !== undefined) {
-      for (const delegation of delegations) {
-        const text = readText(delegation.file)
-        for (const title of delegation.tests) {
-          assert.ok(text.includes(title), `${delegation.file} must still contain the covering test: ${title}`)
-        }
+    assert.ok(
+      run !== undefined || fragment || delegations !== undefined,
+      `implicit seam '${seam.id}' has no probe, type fragment, or covering-test reference`,
+    )
+    if (run !== undefined) await run(context)
+    if (fragment) assertSeamClean(`implicit:${seam.id}`)
+    for (const delegation of delegations ?? []) {
+      const text = readText(delegation.file)
+      for (const title of delegation.tests) {
+        assert.ok(text.includes(title), `${delegation.file} must still contain the covering test: ${title}`)
       }
-      return
     }
-    assert.fail(`implicit seam '${seam.id}' has no probe, type fragment, or covering-test reference`)
   })
 }
 
