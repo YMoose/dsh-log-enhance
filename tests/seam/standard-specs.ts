@@ -1,154 +1,29 @@
 /**
- * 标准规格库（2026-11-13 拆分）：按**上游表面**（`pkg::path`，如
- * `'@deepseek-ai/dsh-session::data.callId'`）键控的探针规格集合。
+ * 标准规格库（2026-11-13 起收缩为"不可推导"的部分）：
  *
- * 这一层不属于任何一个插件仓库：只要上游包的类型/判别字面量长这样，
- * 任何 dsh 插件的 coupling.json 记录到同一个表面，就能复用同一条规格。
- * `standardSpecs(coupling, implicitSeams)` 把库与本仓 coupling.json 求交集：
+ * - 字段/判别探针的收窄 prelude 曾经是这里的手写字典，已死——它漂移于
+ *   插件的真实用法（`sourceEventSeqs` 在 `tool/result` 里被读、字典却按
+ *   `user/message` 探）。如今 `tests/seam/engine.ts` 的
+ *   `probeSpecsFromCoupling()` 从 coupling.json 的访问记录（含扫描器提取
+ *   的守卫上下文，即消费者真相）机械生成每一条规格。
+ * - 这里保留的是**推导不出来**的三块：
+ *   1. `UNVERIFIABLE_LIBRARY`——类型系统证明不了的接触面 + 为什么；
+ *   2. `IMPLICIT_FRAGMENT_LIBRARY`——键为隐性契约 id 的类型片段（别的
+ *      仓库登记同名 id 即复用）；
+ *   3. `ABNORMAL_LIBRARY`——自检场景：mock 上游声明、删一个字段，证明
+ *      "删字段 → 探针编译失败"这条链路是真的。
  *
- * - 插件碰到哪些上游表面，就自动获得哪些标准覆盖；
- * - 库里未被本仓记录的条目被直接忽略——不会产生假的 "stale spec" 报警；
- * - 判别规格的字面量不写死在库里，而是从 coupling.json 的 `discriminants`
- *   段读取（清单是 AST 真相，库只描述"怎么探"）。
- *
- * 隐性类型片段（`IMPLICIT_FRAGMENT_LIBRARY`）例外：它们的键是**隐性契约 id**
- * （如 `'subagent-settled-surface'`），不是上游表面。别的仓库只要在自家的
- * `tests/contracts/implicit-seams.ts` 里登记同名 id，就能复用对应片段。
- *
- * 异常场景（`ABNORMAL_LIBRARY`）同样是标准内容：mock 一份上游声明、删掉
- * 一个字段，证明"删字段 → 探针编译失败"这条链路是真的。
+ * `standardSpecs(coupling, implicitSeams)` 把三者与耦合面求交集，并合并
+ * 机械生成的 fieldSpecs / discriminantSpecs。
  */
 
+import { probeSpecsFromCoupling } from './engine.js'
 import type { Coupling, DiscriminantSpec, MockCheckoutScenario, ProbeSpec, TypeFragment } from './engine.js'
 import type { ImplicitSeam } from '../contracts/implicit-seams.js'
 
 /* ------------------------------------------------------------------ *
- * 规格工厂
+ * 库（不可推导的标准内容）
  * ------------------------------------------------------------------ */
-
-const SESSION_EVENT = (prelude: readonly string[], access: string): ProbeSpec => ({
-  rootType: 'SessionEvent',
-  parameter: 'event: SessionEvent',
-  prelude,
-  access,
-})
-
-/** `data.inserted[].…`：先按事件判别式收窄，再按 message.source.kind 收窄。 */
-const INSERTED = (access: string, guard?: string): ProbeSpec => ({
-  rootType: 'SessionEvent',
-  parameter: 'event: SessionEvent',
-  prelude: ["if (event.type !== 'agent/inbox/spliced') return"],
-  element: { of: 'event.data.inserted', ...guard === undefined ? {} : { guard } },
-  access,
-})
-
-/* ------------------------------------------------------------------ *
- * 库（全部按上游表面键控）
- * ------------------------------------------------------------------ */
-
-const FIELD_SPEC_LIBRARY: Readonly<Record<string, ProbeSpec>> = {
-  // --- @deepseek-ai/cordis：在 apply 里对 ctx 直接验证 -------------------
-  '@deepseek-ai/cordis::effect': { rootType: 'Context', access: 'ctx.effect' },
-  '@deepseek-ai/cordis::logger': { rootType: 'Context', access: 'ctx.logger' },
-  '@deepseek-ai/cordis::logger.info': { rootType: 'Context', access: 'ctx.logger.info' },
-  '@deepseek-ai/cordis::logger.warn': { rootType: 'Context', access: 'ctx.logger.warn' },
-  '@deepseek-ai/cordis::on': { rootType: 'Context', access: 'ctx.on' },
-
-  // --- @deepseek-ai/dsh-agent ------------------------------------------
-  '@deepseek-ai/dsh-agent::id': { rootType: 'Agent', parameter: 'agent: Agent', access: 'agent.id' },
-  '@deepseek-ai/dsh-agent::session': { rootType: 'Agent', parameter: 'agent: Agent', access: 'agent.session' },
-
-  // --- @deepseek-ai/dsh-session：SessionEvent 判别联合 ----------------
-  '@deepseek-ai/dsh-session::data': SESSION_EVENT([], 'event.data'),
-  '@deepseek-ai/dsh-session::data.callId': SESSION_EVENT(["if (event.type !== 'tool/call') return"], 'event.data.callId'),
-  '@deepseek-ai/dsh-session::data.id': SESSION_EVENT(["if (event.type !== 'user/message') return"], 'event.data.id'),
-  '@deepseek-ai/dsh-session::data.inserted': SESSION_EVENT(
-    ["if (event.type !== 'agent/inbox/spliced') return"],
-    'event.data.inserted',
-  ),
-  '@deepseek-ai/dsh-session::data.inserted[].id': INSERTED('item.id'),
-  '@deepseek-ai/dsh-session::data.inserted[].source': INSERTED('item.source'),
-  '@deepseek-ai/dsh-session::data.inserted[].source.kind': INSERTED('item.source.kind'),
-  '@deepseek-ai/dsh-session::data.inserted[].source.senderSessionId': INSERTED(
-    'item.source.senderSessionId',
-    "if (item.source.kind !== 'agent-message') continue",
-  ),
-  '@deepseek-ai/dsh-session::data.name': SESSION_EVENT(["if (event.type !== 'tool/call') return"], 'event.data.name'),
-  '@deepseek-ai/dsh-session::data.source': SESSION_EVENT(["if (event.type !== 'user/message') return"], 'event.data.source'),
-  '@deepseek-ai/dsh-session::data.source.kind': SESSION_EVENT(
-    ["if (event.type !== 'user/message') return"],
-    'event.data.source.kind',
-  ),
-  '@deepseek-ai/dsh-session::data.source.senderSessionId': SESSION_EVENT(
-    ["if (event.type !== 'user/message') return", "if (event.data.source.kind !== 'agent-message') return"],
-    'event.data.source.senderSessionId',
-  ),
-  '@deepseek-ai/dsh-session::data.step': SESSION_EVENT(["if (event.type !== 'step/start') return"], 'event.data.step'),
-  '@deepseek-ai/dsh-session::data.turn': SESSION_EVENT(["if (event.type !== 'turn/start') return"], 'event.data.turn'),
-  '@deepseek-ai/dsh-session::sourceEventSeqs': SESSION_EVENT(
-    ["if (event.type !== 'user/message') return"],
-    'event.sourceEventSeqs',
-  ),
-  '@deepseek-ai/dsh-session::surfaceOp': SESSION_EVENT(["if (event.type !== 'user/message') return"], 'event.surfaceOp'),
-  '@deepseek-ai/dsh-session::type': SESSION_EVENT([], 'event.type'),
-  '@deepseek-ai/dsh-session::seq': SESSION_EVENT([], 'event.seq'),
-
-  // --- @deepseek-ai/dsh-session：Session 根 ---------------------------
-  '@deepseek-ai/dsh-session::firstLiveSeq': {
-    rootType: 'Session',
-    parameter: 'session: Session',
-    access: 'session.firstLiveSeq',
-  },
-  '@deepseek-ai/dsh-session::header': { rootType: 'Session', parameter: 'session: Session', access: 'session.header' },
-  '@deepseek-ai/dsh-session::header.version': {
-    rootType: 'Session',
-    parameter: 'session: Session',
-    access: 'session.header.version',
-  },
-  '@deepseek-ai/dsh-session::id': { rootType: 'Session', parameter: 'session: Session', access: 'session.id' },
-  '@deepseek-ai/dsh-session::isOwnSeq': { rootType: 'Session', parameter: 'session: Session', access: 'session.isOwnSeq' },
-
-  // --- @deepseek-ai/dsh-tools -----------------------------------------
-  '@deepseek-ai/dsh-tools::agent': {
-    rootType: 'Readonly<ToolExecution>|ToolExecution',
-    parameter: 'exec: Readonly<ToolExecution>|ToolExecution',
-    access: 'exec.agent',
-  },
-  '@deepseek-ai/dsh-tools::agent.id': {
-    rootType: 'Readonly<ToolExecution>|ToolExecution',
-    parameter: 'exec: Readonly<ToolExecution>|ToolExecution',
-    prelude: ['if (exec.agent === undefined) return'],
-    access: 'exec.agent.id',
-  },
-  '@deepseek-ai/dsh-tools::agent.session': {
-    rootType: 'ToolExecution',
-    parameter: 'exec: ToolExecution',
-    prelude: ['if (exec.agent === undefined) return'],
-    access: 'exec.agent.session',
-  },
-  '@deepseek-ai/dsh-tools::callId': { rootType: 'ToolExecution', parameter: 'exec: ToolExecution', access: 'exec.callId' },
-  '@deepseek-ai/dsh-tools::name': {
-    rootType: 'Readonly<ToolExecution>|ToolExecution',
-    parameter: 'exec: Readonly<ToolExecution>|ToolExecution',
-    access: 'exec.name',
-  },
-  '@deepseek-ai/dsh-tools::parent': {
-    rootType: 'Readonly<ToolExecution>|ToolExecution',
-    parameter: 'exec: Readonly<ToolExecution>|ToolExecution',
-    access: 'exec.parent',
-  },
-  '@deepseek-ai/dsh-tools::isError': {
-    rootType: 'Readonly<ToolExecutionResult>',
-    parameter: 'result: Readonly<ToolExecutionResult>',
-    access: 'result.isError',
-  },
-  '@deepseek-ai/dsh-tools::value': {
-    rootType: 'Readonly<ToolExecutionResult>',
-    parameter: 'result: Readonly<ToolExecutionResult>',
-    prelude: ['if (result.isError) return'],
-    access: 'result.value',
-  },
-}
 
 /**
  * 类型系统证明不了的接触面。不是"暂时没写"，而是**在这里明确写下为什么不可能**，
@@ -163,48 +38,6 @@ const UNVERIFIABLE_LIBRARY: Readonly<Record<string, string>> = {
   '@deepseek-ai/dsh-tools::value.messageId': 'value 是 JsonValue，读取走索引签名，删掉字段也不会编译失败；'
     + '上游的 output schema 由 implicit/send-message-receipt-local 运行时验证。',
   '@deepseek-ai/dsh-tools::value.messageId.length': '同上，字符串长度建立在 JsonValue 索引访问之后，类型上不可证。',
-}
-
-/**
- * 判别探针的"怎么探"部分（字面量运行时从 coupling.json 的 `discriminants`
- * 段读取）。库覆盖的路径如果本仓 coupling.json 没记，条目被交集掉。
- */
-const DISCRIMINANT_PROBES: Readonly<Record<string, ProbeSpec>> = {
-  '@deepseek-ai/dsh-session::type': {
-    rootType: 'SessionEvent',
-    parameter: 'event: SessionEvent',
-    access: 'event.type',
-  },
-  '@deepseek-ai/dsh-session::data.name': {
-    rootType: 'SessionEvent',
-    parameter: 'event: SessionEvent',
-    prelude: ["if (event.type !== 'tool/call') return"],
-    access: 'event.data.name',
-  },
-  '@deepseek-ai/dsh-session::data.source.kind': {
-    rootType: 'SessionEvent',
-    parameter: 'event: SessionEvent',
-    prelude: ["if (event.type !== 'user/message') return"],
-    access: 'event.data.source.kind',
-  },
-  '@deepseek-ai/dsh-session::data.inserted[].source.kind': {
-    rootType: 'SessionEvent',
-    parameter: 'event: SessionEvent',
-    prelude: ["if (event.type !== 'agent/inbox/spliced') return"],
-    element: { of: 'event.data.inserted' },
-    access: 'item.source.kind',
-  },
-  '@deepseek-ai/dsh-session::surfaceOp': {
-    rootType: 'SessionEvent',
-    parameter: 'event: SessionEvent',
-    prelude: ["if (event.type !== 'user/message') return"],
-    access: 'event.surfaceOp',
-  },
-  '@deepseek-ai/dsh-tools::name': {
-    rootType: 'Readonly<ToolExecution>|ToolExecution',
-    parameter: 'exec: Readonly<ToolExecution>|ToolExecution',
-    access: 'exec.name',
-  },
 }
 
 const IMPLICIT_FRAGMENT_LIBRARY: Readonly<Record<string, readonly TypeFragment[]>> = {
@@ -264,11 +97,11 @@ export type SessionEvent = {
 }
 
 /* ------------------------------------------------------------------ *
- * 交集：库 ∩ 本仓 coupling.json
+ * 交集：库 ∩ 本仓 coupling.json + 机械生成的规格
  * ------------------------------------------------------------------ */
 
 export interface StandardSpecs {
-  readonly fieldSpecs: Readonly<Record<string, ProbeSpec>>
+  readonly fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>
   readonly discriminantSpecs: Readonly<Record<string, DiscriminantSpec>>
   readonly unverifiable: Readonly<Record<string, string>>
   readonly implicitFragments: Readonly<Record<string, readonly TypeFragment[]>>
@@ -281,24 +114,11 @@ const splitKey = (key: string): { readonly pkg: string, readonly path: string } 
 }
 
 /**
- * 标准库 ∩ 本仓耦合面。字段/判别/豁免按 `coupling.json` 记录的上游表面求交，
- * 隐性类型片段按本仓登记的隐性契约 id 求交；本仓新增的规格在薄入口里展开
- * 合并即可（suite 的 stale 检查仍然兜底）。
+ * 标准库 ∩ 本仓耦合面：不可证豁免按 coupling.json 记录的上游表面求交，
+ * 隐性类型片段按本仓登记的隐性契约 id 求交；fieldSpecs /
+ * discriminantSpecs 来自引擎的机械生成（守卫即消费者真相）。
  */
 export function standardSpecs(coupling: Coupling, implicitSeams: readonly ImplicitSeam[]): StandardSpecs {
-  const fieldSpecs = Object.fromEntries(
-    Object.entries(FIELD_SPEC_LIBRARY).filter(([key]) => {
-      const { pkg, path } = splitKey(key)
-      return coupling.fieldPaths[pkg]?.[path] !== undefined
-    }),
-  )
-  const discriminantSpecs = Object.fromEntries(
-    Object.entries(DISCRIMINANT_PROBES).flatMap(([key, probe]): [string, DiscriminantSpec][] => {
-      const { pkg, path } = splitKey(key)
-      const literals = coupling.discriminants[pkg]?.[path]
-      return literals === undefined ? [] : [[key, { ...probe, literals }]]
-    }),
-  )
   const unverifiable = Object.fromEntries(
     Object.entries(UNVERIFIABLE_LIBRARY).filter(([key]) => {
       const { pkg, path } = splitKey(key)
@@ -309,11 +129,12 @@ export function standardSpecs(coupling: Coupling, implicitSeams: readonly Implic
   const implicitFragments = Object.fromEntries(
     Object.entries(IMPLICIT_FRAGMENT_LIBRARY).filter(([id]) => registeredSeams.has(id)),
   )
+  const generated = probeSpecsFromCoupling(coupling)
   return {
-    fieldSpecs,
-    discriminantSpecs,
+    fieldSpecs: generated.fieldSpecs,
+    discriminantSpecs: generated.discriminantSpecs,
     unverifiable,
     implicitFragments,
-    ...(fieldSpecs[ABNORMAL_LIBRARY.specKey] !== undefined ? { abnormal: ABNORMAL_LIBRARY } : {}),
+    ...(generated.fieldSpecs[ABNORMAL_LIBRARY.specKey] !== undefined ? { abnormal: ABNORMAL_LIBRARY } : {}),
   }
 }

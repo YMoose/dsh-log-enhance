@@ -394,356 +394,1077 @@
     "@deepseek-ai/cordis": {
       "effect": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:97",
-          "src/index.ts:111"
+        "accesses": [
+          {
+            "site": "src/index.ts:97",
+            "guards": [
+              {
+                "expr": "manager",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/index.ts:111",
+            "guards": []
+          }
         ]
       },
       "logger": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:98",
-          "src/index.ts:100",
-          "src/index.ts:107",
-          "src/index.ts:116"
+        "accesses": [
+          {
+            "site": "src/index.ts:98",
+            "guards": [
+              {
+                "expr": "manager",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/index.ts:100",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:107",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:116",
+            "guards": []
+          }
         ]
       },
       "logger.info": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:98"
+        "accesses": [
+          {
+            "site": "src/index.ts:98",
+            "guards": [
+              {
+                "expr": "manager",
+                "kind": "defined"
+              }
+            ]
+          }
         ]
       },
       "logger.warn": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:100",
-          "src/index.ts:107",
-          "src/index.ts:116"
+        "accesses": [
+          {
+            "site": "src/index.ts:100",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:107",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:116",
+            "guards": []
+          }
         ]
       },
       "mcpManager": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:84"
+        "accesses": [
+          {
+            "site": "src/index.ts:84",
+            "guards": []
+          }
         ]
       },
       "mcpManager.register": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:89"
+        "accesses": [
+          {
+            "site": "src/index.ts:89",
+            "guards": [
+              {
+                "expr": "manager",
+                "kind": "defined"
+              }
+            ]
+          }
         ]
       },
       "on": {
         "rootType": "Context",
-        "sites": [
-          "src/index.ts:119",
-          "src/index.ts:120",
-          "src/index.ts:124",
-          "src/index.ts:125",
-          "src/index.ts:128",
-          "src/index.ts:131"
+        "accesses": [
+          {
+            "site": "src/index.ts:119",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:120",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:124",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:125",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:128",
+            "guards": []
+          },
+          {
+            "site": "src/index.ts:131",
+            "guards": []
+          }
         ]
       }
     },
     "@deepseek-ai/dsh-agent": {
       "id": {
         "rootType": "Agent",
-        "sites": [
-          "src/observer.ts:180",
-          "src/observer.ts:191"
+        "accesses": [
+          {
+            "site": "src/observer.ts:180",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:191",
+            "guards": []
+          }
         ]
       },
       "session": {
         "rootType": "Agent",
-        "sites": [
-          "src/observer.ts:167",
-          "src/observer.ts:175",
-          "src/observer.ts:188"
+        "accesses": [
+          {
+            "site": "src/observer.ts:167",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:175",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:188",
+            "guards": []
+          }
         ]
       }
     },
     "@deepseek-ai/dsh-session": {
       "data": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:99",
-          "src/observer.ts:100",
-          "src/observer.ts:107",
-          "src/observer.ts:111",
-          "src/observer.ts:121",
-          "src/observer.ts:122",
-          "src/observer.ts:125"
+        "accesses": [
+          {
+            "site": "src/observer.ts:99",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:100",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              },
+              {
+                "expr": "event.data.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:107",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "step/start"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:111",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:121",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:122",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:125",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "data.callId": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:100"
+        "accesses": [
+          {
+            "site": "src/observer.ts:100",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              },
+              {
+                "expr": "event.data.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          }
         ]
       },
       "data.id": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:122"
+        "accesses": [
+          {
+            "site": "src/observer.ts:122",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "data.inserted": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:111"
+        "accesses": [
+          {
+            "site": "src/observer.ts:111",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              }
+            ]
+          }
         ]
       },
       "data.inserted[].id": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:113",
-          "src/observer.ts:117"
+        "accesses": [
+          {
+            "site": "src/observer.ts:113",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              },
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          },
+          {
+            "site": "src/observer.ts:117",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              },
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          }
         ]
       },
       "data.inserted[].source": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:112",
-          "src/observer.ts:114"
+        "accesses": [
+          {
+            "site": "src/observer.ts:112",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          },
+          {
+            "site": "src/observer.ts:114",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              },
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          }
         ]
       },
       "data.inserted[].source.kind": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:112"
+        "accesses": [
+          {
+            "site": "src/observer.ts:112",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          }
         ]
       },
       "data.inserted[].source.senderSessionId": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:114"
+        "accesses": [
+          {
+            "site": "src/observer.ts:114",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "agent/inbox/spliced"
+              },
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ],
+            "elementOf": "event.data.inserted",
+            "binding": "message"
+          }
         ]
       },
       "data.name": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:99"
+        "accesses": [
+          {
+            "site": "src/observer.ts:99",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              }
+            ]
+          }
         ]
       },
       "data.source": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:121",
-          "src/observer.ts:125"
+        "accesses": [
+          {
+            "site": "src/observer.ts:121",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:125",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "data.source.kind": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:121"
+        "accesses": [
+          {
+            "site": "src/observer.ts:121",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              }
+            ]
+          }
         ]
       },
       "data.source.senderSessionId": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:125"
+        "accesses": [
+          {
+            "site": "src/observer.ts:125",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "data.step": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:100",
-          "src/observer.ts:107"
+        "accesses": [
+          {
+            "site": "src/observer.ts:100",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              },
+              {
+                "expr": "event.data.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:107",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "step/start"
+              }
+            ]
+          }
         ]
       },
       "data.turn": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:100",
-          "src/observer.ts:107"
+        "accesses": [
+          {
+            "site": "src/observer.ts:100",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/call"
+              },
+              {
+                "expr": "event.data.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:107",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "step/start"
+              }
+            ]
+          }
         ]
       },
       "firstLiveSeq": {
         "rootType": "Session",
-        "sites": [
-          "src/observer.ts:94"
+        "accesses": [
+          {
+            "site": "src/observer.ts:94",
+            "guards": []
+          }
         ]
       },
       "header": {
         "rootType": "Session",
-        "sites": [
-          "src/observer.ts:82"
+        "accesses": [
+          {
+            "site": "src/observer.ts:82",
+            "guards": []
+          }
         ]
       },
       "header.version": {
         "rootType": "Session",
-        "sites": [
-          "src/observer.ts:82"
+        "accesses": [
+          {
+            "site": "src/observer.ts:82",
+            "guards": []
+          }
         ]
       },
       "id": {
         "rootType": "Session",
-        "sites": [
-          "src/observer.ts:82",
-          "src/observer.ts:126"
+        "accesses": [
+          {
+            "site": "src/observer.ts:82",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:126",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              },
+              {
+                "expr": "event.surfaceOp",
+                "kind": "eq",
+                "literal": "append"
+              },
+              {
+                "expr": "event.data.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "isOwnSeq": {
         "rootType": "Session",
-        "sites": [
-          "src/observer.ts:94"
+        "accesses": [
+          {
+            "site": "src/observer.ts:94",
+            "guards": []
+          }
         ]
       },
       "seq": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:82",
-          "src/observer.ts:94"
+        "accesses": [
+          {
+            "site": "src/observer.ts:82",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:94",
+            "guards": []
+          }
         ]
       },
       "sourceEventSeqs": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:105"
+        "accesses": [
+          {
+            "site": "src/observer.ts:105",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "tool/result"
+              }
+            ]
+          }
         ]
       },
       "surfaceOp": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:121"
+        "accesses": [
+          {
+            "site": "src/observer.ts:121",
+            "guards": [
+              {
+                "expr": "event.type",
+                "kind": "eq",
+                "literal": "user/message"
+              }
+            ]
+          }
         ]
       },
       "type": {
         "rootType": "SessionEvent",
-        "sites": [
-          "src/observer.ts:97"
+        "accesses": [
+          {
+            "site": "src/observer.ts:97",
+            "guards": []
+          }
         ]
       }
     },
     "@deepseek-ai/dsh-tools": {
       "agent": {
         "rootType": "Readonly<ToolExecution>|ToolExecution",
-        "sites": [
-          "src/observer.ts:137",
-          "src/observer.ts:138",
-          "src/observer.ts:142",
-          "src/observer.ts:152",
-          "src/observer.ts:155"
+        "accesses": [
+          {
+            "site": "src/observer.ts:137",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:138",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:142",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:152",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.parent",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:155",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          }
         ]
       },
       "agent.id": {
         "rootType": "Readonly<ToolExecution>|ToolExecution",
-        "sites": [
-          "src/observer.ts:142",
-          "src/observer.ts:152",
-          "src/observer.ts:155"
+        "accesses": [
+          {
+            "site": "src/observer.ts:142",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:152",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.parent",
+                "kind": "defined"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:155",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          }
         ]
       },
       "agent.session": {
         "rootType": "ToolExecution",
-        "sites": [
-          "src/observer.ts:138"
+        "accesses": [
+          {
+            "site": "src/observer.ts:138",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          }
         ]
       },
       "callId": {
         "rootType": "ToolExecution",
-        "sites": [
-          "src/observer.ts:140"
+        "accesses": [
+          {
+            "site": "src/observer.ts:140",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              }
+            ]
+          }
         ]
       },
       "isError": {
         "rootType": "Readonly<ToolExecutionResult>",
-        "sites": [
-          "src/observer.ts:156"
+        "accesses": [
+          {
+            "site": "src/observer.ts:156",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          }
         ]
       },
       "name": {
         "rootType": "Readonly<ToolExecution>|ToolExecution",
-        "sites": [
-          "src/observer.ts:137",
-          "src/observer.ts:151"
+        "accesses": [
+          {
+            "site": "src/observer.ts:137",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:151",
+            "guards": []
+          }
         ]
       },
       "parent": {
         "rootType": "Readonly<ToolExecution>|ToolExecution",
-        "sites": [
-          "src/observer.ts:137",
-          "src/observer.ts:152"
+        "accesses": [
+          {
+            "site": "src/observer.ts:137",
+            "guards": []
+          },
+          {
+            "site": "src/observer.ts:152",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              }
+            ]
+          }
         ]
       },
       "value": {
         "rootType": "Readonly<ToolExecutionResult>",
-        "sites": [
-          "src/observer.ts:157"
+        "accesses": [
+          {
+            "site": "src/observer.ts:157",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "result.isError",
+                "kind": "falsy"
+              }
+            ]
+          }
         ]
       },
       "value.messageId": {
         "rootType": "Readonly<ToolExecutionResult>",
-        "sites": [
-          "src/observer.ts:159",
-          "src/observer.ts:163"
+        "accesses": [
+          {
+            "site": "src/observer.ts:159",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "result.isError",
+                "kind": "falsy"
+              }
+            ]
+          },
+          {
+            "site": "src/observer.ts:163",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "result.isError",
+                "kind": "falsy"
+              }
+            ]
+          }
         ]
       },
       "value.messageId.length": {
         "rootType": "Readonly<ToolExecutionResult>",
-        "sites": [
-          "src/observer.ts:159"
+        "accesses": [
+          {
+            "site": "src/observer.ts:159",
+            "guards": [
+              {
+                "expr": "exec.name",
+                "kind": "eq",
+                "literal": "send_message"
+              },
+              {
+                "expr": "result.isError",
+                "kind": "falsy"
+              }
+            ]
+          }
         ]
       }
     },
     "event:agent/inbox/claimed": {
       "message.id": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:129"
+        "accesses": [
+          {
+            "site": "src/index.ts:129",
+            "guards": [
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "message.source": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:129"
+        "accesses": [
+          {
+            "site": "src/index.ts:129",
+            "guards": []
+          }
         ]
       },
       "message.source.kind": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:129"
+        "accesses": [
+          {
+            "site": "src/index.ts:129",
+            "guards": []
+          }
         ]
       }
     },
     "event:agent/inbox/discarded": {
       "message.id": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:132"
+        "accesses": [
+          {
+            "site": "src/index.ts:132",
+            "guards": [
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "message.source": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:132"
+        "accesses": [
+          {
+            "site": "src/index.ts:132",
+            "guards": []
+          }
         ]
       },
       "message.source.kind": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:132"
+        "accesses": [
+          {
+            "site": "src/index.ts:132",
+            "guards": []
+          }
         ]
       }
     },
     "event:agent/inbox/inserted": {
       "message.id": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:126"
+        "accesses": [
+          {
+            "site": "src/index.ts:126",
+            "guards": [
+              {
+                "expr": "message.source.kind",
+                "kind": "eq",
+                "literal": "agent-message"
+              }
+            ]
+          }
         ]
       },
       "message.source": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:126"
+        "accesses": [
+          {
+            "site": "src/index.ts:126",
+            "guards": []
+          }
         ]
       },
       "message.source.kind": {
         "rootType": "unknown",
-        "sites": [
-          "src/index.ts:126"
+        "accesses": [
+          {
+            "site": "src/index.ts:126",
+            "guards": []
+          }
         ]
       }
     }

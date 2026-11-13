@@ -42,7 +42,25 @@ export interface HookRecord {
 
 export interface PathRecord {
   readonly rootType: string
-  readonly sites: readonly string[]
+  /** One entry per source access site, each with the guards it runs under. */
+  readonly accesses: readonly AccessRecord[]
+}
+
+/** 源码里这条读取实际所处的收窄（消费者真相，由扫描器提取）。 */
+export interface Guard {
+  /** 插件源码里的访问链文本，如 `event.type`。 */
+  readonly expr: string
+  /** `eq`/`ne`：字面量比较；`defined`：链非 undefined；`falsy`：链为假值。 */
+  readonly kind: 'eq' | 'ne' | 'defined' | 'falsy'
+  readonly literal?: string
+}
+
+export interface AccessRecord {
+  readonly site: string
+  readonly guards: readonly Guard[]
+  /** `for…of` 元素读取：被遍历表达式与循环变量名。 */
+  readonly elementOf?: string
+  readonly binding?: string
 }
 
 export interface Coupling {
@@ -64,10 +82,19 @@ export interface ProbeSpec {
   readonly parameter?: string
   /** 取字段前必须做的收窄（判别式 / undefined / 联合分支）。 */
   readonly prelude?: readonly string[]
-  /** `[]` 元素跳：遍历的数组表达式，以及循环内的可选收窄。 */
-  readonly element?: { readonly of: string; readonly guard?: string }
+  /** `[]` 元素跳：遍历的数组表达式、循环变量名，以及循环内的收窄行。 */
+  readonly element?: {
+    readonly of: string
+    readonly guard?: string
+    readonly binding?: string
+    readonly inner?: readonly string[]
+  }
   /** 被验证的字段访问表达式。 */
   readonly access: string
+  /** 机械生成时该规格对应的访问点（手写 override 没有）。 */
+  readonly site?: string
+  /** 该访问点的守卫，按源码顺序（用于标题摘要；prelude 只回放与探针参数同根的守卫）。 */
+  readonly guards?: readonly Guard[]
 }
 
 /** 判别字面量：同一个路径上的字面量集合要仍然是联合的成员。 */
@@ -128,8 +155,15 @@ export interface InventoryFloors {
 export interface SeamSuite {
   readonly root: string
   readonly coupling: Coupling
-  readonly fieldSpecs: Readonly<Record<string, ProbeSpec>>
+  /** 每条路径一个或多个规格（每个访问点一个）；`event:*` 载荷由挂载循环生成。 */
+  readonly fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>
   readonly discriminantSpecs: Readonly<Record<string, DiscriminantSpec>>
+  /**
+   * 逃生口：键为 `pkg::path@site`（只换该访问点的规格）或裸 `pkg::path`
+   * （整条路径只留这一份），替换机械生成的规格——用于提取器暂不覆盖的
+   * 形状。本仓今天应为空；非空即提取器缺口信号。
+   */
+  readonly overrides?: Readonly<Record<string, ProbeSpec>> | undefined
   /** 类型系统证明不了的接触面：键是表面，值是"为什么不可能"的理由。 */
   readonly unverifiable: Readonly<Record<string, string>>
   /** 键是隐性契约 id（与 `implicitSeams` 对齐），不是上游表面。 */
@@ -177,6 +211,168 @@ export function loadCoupling(root: string): Coupling {
 }
 
 export const quote = (value: string): string => JSON.stringify(value)
+
+/* ------------------------------------------------------------------ *
+ * 机械规格生成：coupling.json 的访问记录 → ProbeSpec
+ *
+ * 探针的收窄 prelude 不再来自手写字典，而是来自插件自己源码里每次读取
+ * 实际所处的守卫（消费者真相）。跨根守卫（探针参数之外的变量）只进标题
+ * 摘要、不回放进 prelude——回放需要第二个参数的根类型，而清单只记录
+ * 路径级根类型；丢弃只会让探针更宽，编译失败即响亮暴露。
+ * ------------------------------------------------------------------ */
+
+/** 与手写字典同时代的参数命名，生成的探针读起来和从前一样。 */
+const PARAMETER_NAMES: Readonly<Record<string, string>> = {
+  Context: 'ctx',
+  Agent: 'agent',
+  Session: 'session',
+  SessionEvent: 'event',
+  ToolExecution: 'exec',
+  'Readonly<ToolExecution>|ToolExecution': 'exec',
+  'Readonly<ToolExecutionResult>': 'result',
+}
+
+function parameterNameOf(rootType: string): string {
+  const known = PARAMETER_NAMES[rootType]
+  if (known !== undefined) return known
+  const identifier = /([A-Za-z_$][\w$]*)\s*$/.exec(rootType)?.[1] ?? 'value'
+  return identifier.charAt(0).toLowerCase() + identifier.slice(1)
+}
+
+/** 守卫 → 探针里的收窄行（不含结尾的 `return`/`continue`）。 */
+export function guardLine(guard: Guard): string {
+  if (guard.kind === 'eq') return `if (${guard.expr} !== ${quote(guard.literal ?? '')})`
+  if (guard.kind === 'ne') return `if (${guard.expr} === ${quote(guard.literal ?? '')})`
+  if (guard.kind === 'defined') return `if (${guard.expr} === undefined)`
+  return `if (${guard.expr})`
+}
+
+/** 标题里的守卫摘要：`event.type='tool/call' & exec.agent defined`。 */
+export function guardSummary(guards: readonly Guard[]): string {
+  return guards.map(guard => {
+    if (guard.kind === 'eq') return `${guard.expr}='${guard.literal}'`
+    if (guard.kind === 'ne') return `${guard.expr}!='${guard.literal}'`
+    if (guard.kind === 'defined') return `${guard.expr} defined`
+    return `!${guard.expr}`
+  }).join(' & ')
+}
+
+const baseOf = (expr: string): string => expr.split('.')[0] ?? expr
+
+/** 只回放与 `root` 同根的守卫（其余只进标题）。 */
+const replayable = (guards: readonly Guard[], root: string): readonly Guard[] =>
+  guards.filter(guard => baseOf(guard.expr) === root)
+
+/**
+ * 把 coupling.json 的每一条访问记录变成一个 ProbeSpec：守卫按源码顺序回放
+ * 成 prelude（元素读取拆成外层 `return` 行 + 循环内 `continue` 行）。
+ * `event:*` 载荷路径跳过——它们由挂载循环机械覆盖。无法推导的形状
+ * （例如嵌套循环元素链）返回 null：该路径会以 unprobed 响亮失败，由
+ * `overrides` 兜底。
+ */
+export function probeSpecsFromCoupling(coupling: Coupling): {
+  readonly fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>
+  readonly discriminantSpecs: Readonly<Record<string, DiscriminantSpec>>
+} {
+  const fieldSpecs: Record<string, readonly ProbeSpec[]> = {}
+  const specFor = (path: string, record: PathRecord, access: AccessRecord): ProbeSpec | null => {
+    const rootType = record.rootType
+    if (rootType === 'Context') {
+      return {
+        rootType,
+        prelude: replayable(access.guards, 'ctx').map(guard => `${guardLine(guard)} return`),
+        access: `ctx.${path}`,
+        site: access.site,
+        guards: access.guards,
+      }
+    }
+    const parameter = parameterNameOf(rootType)
+    if (access.elementOf !== undefined && access.binding !== undefined) {
+      const origin = access.elementOf.startsWith(`${parameter}.`)
+        ? access.elementOf.slice(parameter.length + 1)
+        : access.elementOf.replace(/^[^.]+\./, '')
+      const expected = `${origin}[]`
+      const rest = path === expected ? '' : path.startsWith(`${expected}.`) ? path.slice(expected.length + 1) : null
+      if (rest === null) return null
+      const outer = replayable(access.guards, parameter).map(guard => `${guardLine(guard)} return`)
+      const inner = access.guards
+        .filter(guard => baseOf(guard.expr) === access.binding)
+        .map(guard => `${guardLine(guard)} continue`)
+      return {
+        rootType,
+        parameter: `${parameter}: ${rootType}`,
+        ...(outer.length === 0 ? {} : { prelude: outer }),
+        element: {
+          of: access.elementOf,
+          binding: access.binding,
+          ...(inner.length === 0 ? {} : { inner }),
+        },
+        access: rest === '' ? access.binding : `${access.binding}.${rest}`,
+        site: access.site,
+        guards: access.guards,
+      }
+    }
+    const prelude = replayable(access.guards, parameter).map(guard => `${guardLine(guard)} return`)
+    return {
+      rootType,
+      parameter: `${parameter}: ${rootType}`,
+      ...(prelude.length === 0 ? {} : { prelude }),
+      access: `${parameter}.${path}`,
+      site: access.site,
+      guards: access.guards,
+    }
+  }
+
+  for (const [pkg, paths] of Object.entries(coupling.fieldPaths)) {
+    if (pkg.startsWith('event:')) continue
+    for (const [path, record] of Object.entries(paths)) {
+      const specs = record.accesses
+        .map(access => specFor(path, record, access))
+        .filter((spec): spec is ProbeSpec => spec !== null)
+      if (specs.length > 0) fieldSpecs[`${pkg}::${path}`] = specs
+    }
+  }
+
+  const discriminantSpecs: Record<string, DiscriminantSpec> = {}
+  for (const [pkg, paths] of Object.entries(coupling.discriminants)) {
+    if (pkg.startsWith('event:')) continue
+    for (const [path, literals] of Object.entries(paths)) {
+      const record = coupling.fieldPaths[pkg]?.[path]
+      const access = record?.accesses[0]
+      if (record === undefined || access === undefined) continue
+      const spec = specFor(path, record, access)
+      if (spec === null) continue
+      discriminantSpecs[`${pkg}::${path}`] = { ...spec, literals }
+    }
+  }
+
+  return { fieldSpecs, discriminantSpecs }
+}
+
+/** 应用逃生口：`pkg::path@site` 只换该访问点，裸 `pkg::path` 整条路径只留一份。 */
+export function applyOverrides(
+  fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>,
+  overrides: Readonly<Record<string, ProbeSpec>>,
+): Readonly<Record<string, readonly ProbeSpec[]>> {
+  const result: Record<string, readonly ProbeSpec[]> = { ...fieldSpecs }
+  for (const [key, override] of Object.entries(overrides)) {
+    const separator = key.lastIndexOf('::')
+    const at = separator === -1 ? -1 : key.indexOf('@', separator + 2)
+    const pathKey = at === -1 ? key : key.slice(0, at)
+    const site = at === -1 ? undefined : key.slice(at + 1)
+    const existing = result[pathKey]
+    if (existing === undefined) throw new Error(`override '${key}' targets a surface with no generated spec`)
+    if (site === undefined) {
+      result[pathKey] = [override]
+      continue
+    }
+    if (existing.every(spec => spec.site !== site)) {
+      throw new Error(`override '${key}' matches no generated access site`)
+    }
+    result[pathKey] = existing.map(spec => spec.site === site ? override : spec)
+  }
+  return result
+}
 
 /* ------------------------------------------------------------------ *
  * 标准探针（与仓库无关，任何接入仓都能用）
@@ -278,8 +474,10 @@ function probeBodyLines(spec: ProbeSpec, indent: string): string[] {
   const out: string[] = []
   for (const line of spec.prelude ?? []) out.push(`${indent}${line}`)
   if (spec.element !== undefined) {
-    out.push(`${indent}for (const item of ${spec.element.of}) {`)
+    const binding = spec.element.binding ?? 'item'
+    out.push(`${indent}for (const ${binding} of ${spec.element.of}) {`)
     if (spec.element.guard !== undefined) out.push(`${indent}  ${spec.element.guard}`)
+    for (const line of spec.element.inner ?? []) out.push(`${indent}  ${line}`)
     out.push(`${indent}  const _probe = ${spec.access}`)
     out.push(`${indent}  void _probe`)
     out.push(`${indent}}`)
@@ -309,7 +507,16 @@ function generate(suite: SeamSuite): Generated {
     segments.set(id, { id, title })
     return id
   }
-  const siteOf = (pkg: string, path: string): string => coupling.fieldPaths[pkg]?.[path]?.sites[0] ?? 'unknown'
+  const siteOf = (pkg: string, path: string): string =>
+    coupling.fieldPaths[pkg]?.[path]?.accesses[0]?.site ?? 'unknown'
+
+  /** 探针标题：带上访问点与守卫摘要，同一路径的多个访问点一眼可分。 */
+  const fieldTitle = (pkg: string, path: string, spec: ProbeSpec, record: PathRecord): string => {
+    const site = spec.site ?? record.accesses[0]?.site ?? 'unknown'
+    const guards = spec.guards ?? []
+    const under = guards.length === 0 ? '' : ` under ${guardSummary(guards)}`
+    return `[auto/field] ${pkg} :: ${path} (at ${site}${under}) -> Audit ${auditSection(pkg, path)}`
+  }
 
   const hookSite = (event: string, kind: 'src' | 'test'): string => {
     // Read the site from coupling.json (the scanner's AST truth) instead of
@@ -347,26 +554,24 @@ function generate(suite: SeamSuite): Generated {
   emit('export const registered: string[] = []')
   emit('')
 
-  // ---- 顶层字段探针 -------------------------------------------------
+  // ---- 顶层字段探针（每个访问点一个） --------------------------------
   for (const [pkg, paths] of Object.entries(coupling.fieldPaths)) {
     if (pkg.startsWith('event:') || pkg === '@deepseek-ai/cordis') continue
     for (const [path, record] of Object.entries(paths)) {
       const key = `${pkg}::${path}`
       // 类型上不可证的接触面在 unverifiable 里写明理由，由隐性层探针补运行时证据。
       if (key in unverifiable) { covered.add(key); continue }
-      const spec = fieldSpecs[key]
-      if (spec === undefined) continue
-      checkRoot(key, spec, record)
-      const seam = claim(
-        `field:${key}`,
-        `[auto/field] ${pkg} :: ${path} (at ${record.sites[0] ?? 'unknown'}) -> Audit ${auditSection(pkg, path)}`,
-      )
-      covered.add(key)
-      emit(`// ${key}`, seam)
-      emit(`function probe_${counter += 1}(${spec.parameter ?? ''}): void {`, seam)
-      for (const line of probeBodyLines(spec, '  ')) emit(line, seam)
-      emit('}', seam)
-      emit('', seam)
+      const specs = fieldSpecs[key] ?? []
+      specs.forEach((spec, index) => {
+        checkRoot(spec.site === undefined ? key : `${key}@${spec.site}`, spec, record)
+        const seam = claim(`field:${key}@${spec.site ?? index}`, fieldTitle(pkg, path, spec, record))
+        covered.add(key)
+        emit(`// ${key} @ ${spec.site ?? index}`, seam)
+        emit(`function probe_${counter += 1}(${spec.parameter ?? ''}): void {`, seam)
+        for (const line of probeBodyLines(spec, '  ')) emit(line, seam)
+        emit('}', seam)
+        emit('', seam)
+      })
     }
   }
 
@@ -388,8 +593,10 @@ function generate(suite: SeamSuite): Generated {
       const body: string[] = []
       for (const line of spec.prelude ?? []) body.push(`  ${line}`)
       if (spec.element !== undefined) {
-        body.push(`  for (const item of ${spec.element.of}) {`)
+        const binding = spec.element.binding ?? 'item'
+        body.push(`  for (const ${binding} of ${spec.element.of}) {`)
         if (spec.element.guard !== undefined) body.push(`    ${spec.element.guard}`)
+        for (const line of spec.element.inner ?? []) body.push(`    ${line}`)
         for (const literal of literals) body.push(`    if (${spec.access} === ${quote(literal)}) { void ${spec.access} }`)
         body.push('  }')
       } else {
@@ -440,12 +647,15 @@ function generate(suite: SeamSuite): Generated {
     const payloadKey = `event:${hook.event}`
     for (const [path, record] of Object.entries(coupling.fieldPaths[payloadKey] ?? {})) {
       const key = `${payloadKey}::${path}`
-      const fieldSeam = claim(
-        `field:${key}`,
-        `[auto/field] ${payloadKey} :: ${path} (at ${record.sites[0] ?? 'unknown'}) -> Audit ${auditSection(payloadKey, path)}`,
-      )
-      covered.add(key)
-      emit(`    void payload.${path}`, fieldSeam)
+      for (const access of record.accesses) {
+        const under = access.guards.length === 0 ? '' : ` under ${guardSummary(access.guards)}`
+        const fieldSeam = claim(
+          `field:${key}@${access.site}`,
+          `[auto/field] ${payloadKey} :: ${path} (at ${access.site}${under}) -> Audit ${auditSection(payloadKey, path)}`,
+        )
+        covered.add(key)
+        emit(`    void payload.${path}`, fieldSeam)
+      }
     }
     for (const [path, literals] of Object.entries(coupling.discriminants[payloadKey] ?? {})) {
       const key = `${payloadKey}::${path}`
@@ -467,21 +677,19 @@ function generate(suite: SeamSuite): Generated {
   for (const hook of coupling.srcHooks) emitHook(hook, 'src')
   for (const hook of coupling.testHooks) emitHook(hook, 'test')
 
-  // ---- ctx 作用域的字段（只能在 apply 里验证） ----------------------
+  // ---- ctx 作用域的字段（只能在 apply 里验证，每个访问点一个） ------
   for (const [path, record] of Object.entries(coupling.fieldPaths['@deepseek-ai/cordis'] ?? {})) {
     const key = `@deepseek-ai/cordis::${path}`
     if (key in unverifiable) { covered.add(key); continue }
-    const spec = fieldSpecs[key]
-    if (spec === undefined) continue
-    checkRoot(key, spec, record)
-    const seam = claim(
-      `field:${key}`,
-      `[auto/field] @deepseek-ai/cordis :: ${path} (at ${record.sites[0] ?? 'unknown'}) -> Audit ${auditSection('@deepseek-ai/cordis', path)}`,
-    )
-    covered.add(key)
-    emit('  {', seam)
-    for (const line of probeBodyLines(spec, '    ')) emit(line, seam)
-    emit('  }', seam)
+    const specs = fieldSpecs[key] ?? []
+    specs.forEach((spec, index) => {
+      checkRoot(spec.site === undefined ? key : `${key}@${spec.site}`, spec, record)
+      const seam = claim(`field:${key}@${spec.site ?? index}`, fieldTitle('@deepseek-ai/cordis', path, spec, record))
+      covered.add(key)
+      emit('  {', seam)
+      for (const line of probeBodyLines(spec, '    ')) emit(line, seam)
+      emit('  }', seam)
+    })
   }
 
   emit('}')
@@ -595,7 +803,11 @@ export function runSeamSuite(suite: SeamSuite): void {
   /** 生成物落在 `dist-test/`（已被 .gitignore 忽略，且每次 `npm test` 会重建）。 */
   const probeTs = join(suite.root, 'dist-test', 'seam-probe.ts')
   const probeMjs = join(suite.root, 'dist-test', 'seam-probe.mjs')
-  const generated = generate(suite)
+  /** 逃生口在此落地：overrides 替换机械生成的规格后再生效。 */
+  const effective = suite.overrides === undefined
+    ? suite
+    : { ...suite, fieldSpecs: applyOverrides(suite.fieldSpecs, suite.overrides) }
+  const generated = generate(effective)
 
   let compilation: { readonly diagnostics: readonly DiagnosticRecord[] } | undefined
 
@@ -728,8 +940,9 @@ export function runSeamSuite(suite: SeamSuite): void {
 
   // ---- 异常场景：mock checkout 删掉一个字段，探路插件必须编译失败 ----
   const scenario = suite.abnormal
-  if (scenario !== undefined && suite.fieldSpecs[scenario.specKey] !== undefined) {
-    const spec = suite.fieldSpecs[scenario.specKey] as ProbeSpec
+  const abnormalSpec = scenario === undefined ? undefined : effective.fieldSpecs[scenario.specKey]?.[0]
+  if (scenario !== undefined && abnormalSpec !== undefined) {
+    const spec = abnormalSpec
     test(scenario.title, () => {
       const control = compileAgainstMock(scenario, spec, scenario.mockTypes)
       assert.deepEqual(control, [], 'the mock with the field present must compile cleanly')

@@ -163,7 +163,9 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    `scripts/analyze-dsh-coupling.mjs`（默认模式出自家耦合草表，`--write` 固化）、
    `tests/seam/`（接触面验货引擎 + 标准规格库，见
    [seam-driven-verification.md](seam-driven-verification.md)；接入仓自写
-   `tests/contracts/{implicit-seams,seam-runs}.ts` 与一个调 `runSeamSuite` 的薄入口）、
+   `tests/contracts/{implicit-seams,seam-runs}.ts` 与一个调 `runSeamSuite` 的薄入口。
+   探针收窄已不靠手写的上游字典——扫描器从插件自己的源码提取守卫上下文，
+   验货器对上游结构不可知），
    `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
    第三方 action 一律 SHA pin（本仓现已不依赖任何第三方 action）；workflow 里
    不出现版本号——版本状态只在 package.json 与 baseline.json。

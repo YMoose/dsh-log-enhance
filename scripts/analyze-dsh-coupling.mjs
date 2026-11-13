@@ -10,9 +10,13 @@
  *     callback parameter shape (destructured names are the field surface),
  *     `ctx.<service>` accesses (casts unwrapped), and dotted field paths read
  *     on parameters annotated with imported DeepSeek types — attributed to
- *     the package the annotation type came from. Each field path keeps the
- *     reading sites (`file:line`) and the root type it was read through, so a
- *     renamed property is traceable to the code that breaks.
+ *     the package the annotation type came from. Each field path keeps every
+ *     reading site (`file:line`) with the root type it was read through AND
+ *     the guard context it runs under (case labels, early-return negations,
+ *     optional chains — `{ expr, kind: eq|ne|defined|falsy, literal? }`), so
+ *     a renamed property is traceable to the code that breaks and the seam
+ *     verifier can probe each access exactly as narrowly as the plugin
+ *     itself reads it.
  *   - Layer 1 extras with no annotation to lean on: `export const inject`,
  *     string-literal discriminants (`switch (event.type)` cases and
  *     `event.type === '…'` comparisons), `for (const x of event.data.items)`
@@ -204,11 +208,30 @@ function analyzeFile(path, root, state) {
     return packages
   }
 
-  const recordFieldPath = (key, fieldPath, rootType, site) => {
+  /**
+   * Field reads and discriminant literals, with the guard context each read
+   * runs under. `guards` are recorded as source-text expressions
+   * (`{ expr, kind: 'eq'|'ne'|'defined'|'falsy', literal? }`); `loop` carries
+   * a `for…of` element binding (`{ binding, elementOf }`) for reads through
+   * the loop variable.
+   */
+  const recordFieldPath = (key, fieldPath, rootType, site, guards = [], loop = null) => {
     const bucket = state.fieldPaths[key] ?? new Map()
-    const entry = bucket.get(fieldPath) ?? { rootTypes: new Set(), sites: new Set() }
+    const entry = bucket.get(fieldPath) ?? { rootTypes: new Set(), accesses: new Map() }
     entry.rootTypes.add(rootType)
-    entry.sites.add(site)
+    const guardId = guard => `${guard.expr}|${guard.kind}|${guard.literal ?? ''}`
+    const access = entry.accesses.get(site) ?? { site, guards: [] }
+    const seen = new Set(access.guards.map(guardId))
+    for (const guard of guards) {
+      if (seen.has(guardId(guard))) continue
+      seen.add(guardId(guard))
+      access.guards.push(guard)
+    }
+    if (loop !== null) {
+      access.elementOf = loop.elementOf
+      access.binding = loop.binding
+    }
+    entry.accesses.set(site, access)
     bucket.set(fieldPath, entry)
     state.fieldPaths[key] = bucket
   }
@@ -283,20 +306,148 @@ function analyzeFile(path, root, state) {
     }
     collect(node.body)
 
-    // Pass 2: field reads and discriminant literals.
-    const walk = current => {
-      // switch (event.type) { case 'x': … } — every case is a discriminant.
+    // Pass 2: field reads and discriminant literals, carrying the guard
+    // context (case labels, early returns, optional chains) so every access
+    // records the narrowing it actually runs under. Guards are recorded as
+    // source-text expressions; a shape this pass cannot express is dropped,
+    // which only widens the probe — the engine's tsc compile is the semantic
+    // verifier, so a missed guard fails loudly instead of passing broader.
+    const guardId = guard => `${guard.expr}|${guard.kind}|${guard.literal ?? ''}`
+    const mergeGuards = (guards, extra) => {
+      const seen = new Set(guards.map(guardId))
+      const merged = [...guards]
+      for (const guard of extra) {
+        if (seen.has(guardId(guard))) continue
+        seen.add(guardId(guard))
+        merged.push(guard)
+      }
+      return merged
+    }
+
+    /**
+     * What a condition proves when true (`positive`) and when false
+     * (`negative`). null = not expressible as a guard, so the dependent code
+     * is probed without it (sound: fewer recorded guards only widen).
+     */
+    const conditionOf = condition => {
+      const unwrapped = unwrap(condition)
+      if (ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken) {
+        const inner = conditionOf(unwrapped.operand)
+        return { positive: inner.negative, negative: inner.positive }
+      }
+      if (ts.isBinaryExpression(unwrapped)) {
+        const operator = unwrapped.operatorToken.kind
+        if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
+          // (A && B) true proves both; the negation is a disjunction — drop.
+          const parts = [conditionOf(unwrapped.left), conditionOf(unwrapped.right)]
+          return {
+            positive: parts.flatMap(part => part.positive ?? []),
+            negative: null,
+          }
+        }
+        if (operator === ts.SyntaxKind.BarBarToken) {
+          // (A || B) false proves every negated disjunct (unexpressible ones
+          // are dropped, which still holds); true proves no single one.
+          const parts = [conditionOf(unwrapped.left), conditionOf(unwrapped.right)]
+          return {
+            positive: null,
+            negative: parts.flatMap(part => part.negative ?? []),
+          }
+        }
+        if (EQUALITY.has(operator)) {
+          const negated = operator === ts.SyntaxKind.ExclamationEqualsToken
+            || operator === ts.SyntaxKind.ExclamationEqualsEqualsToken
+          for (const [access, literalNode] of [[unwrapped.left, unwrapped.right], [unwrapped.right, unwrapped.left]]) {
+            if (resolve(access) === null) continue
+            const expr = access.getText(source)
+            if (ts.isIdentifier(literalNode) && literalNode.text === 'undefined') {
+              return negated
+                ? { positive: [{ expr, kind: 'defined' }], negative: null }
+                : { positive: null, negative: [{ expr, kind: 'defined' }] }
+            }
+            if (ts.isStringLiteralLike(literalNode)) {
+              const literal = literalNode.text
+              return negated
+                ? { positive: [{ expr, kind: 'ne', literal }], negative: [{ expr, kind: 'eq', literal }] }
+                : { positive: [{ expr, kind: 'eq', literal }], negative: [{ expr, kind: 'ne', literal }] }
+            }
+          }
+        }
+      }
+      // Truthiness of a tracked chain: `x` narrows optionals to defined and
+      // `!x` (via the negation above) to falsy.
+      if (resolve(unwrapped) !== null) {
+        return { positive: [{ expr: unwrapped.getText(source), kind: 'defined' }], negative: [{ expr: unwrapped.getText(source), kind: 'falsy' }] }
+      }
+      return { positive: null, negative: null }
+    }
+
+    /** Control leaves the statement list at this statement (a terminating
+     *  `if` only counts when every branch terminates). */
+    const terminates = statement => {
+      if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)
+        || ts.isBreakStatement(statement) || ts.isContinueStatement(statement)) return true
+      if (ts.isBlock(statement)) return statement.statements.some(terminates)
+      if (ts.isIfStatement(statement)) {
+        return statement.elseStatement !== undefined
+          && terminates(statement.thenStatement) && terminates(statement.elseStatement)
+      }
+      return false
+    }
+
+    const walk = (current, scope) => {
+      if (ts.isBlock(current)) return walkStatements(current.statements, scope)
+      if (ts.isIfStatement(current)) {
+        walk(current.expression, scope) // the condition's reads carry the outer scope only
+        const { positive, negative } = conditionOf(current.expression)
+        walk(current.thenStatement,
+          positive === null ? scope : { ...scope, guards: mergeGuards(scope.guards, positive) })
+        if (current.elseStatement !== undefined) {
+          walk(current.elseStatement,
+            negative === null ? scope : { ...scope, guards: mergeGuards(scope.guards, negative) })
+        }
+        return
+      }
+      // switch (event.type) { case 'x': … } — every case is a discriminant,
+      // and the clause body runs narrowed to the case literal. A clause's
+      // guard ends at the next clause: a fall-through inherits nothing, so
+      // it is probed conservatively rather than wrongly narrowed.
       if (ts.isSwitchStatement(current)) {
+        walk(current.expression, scope)
         const target = resolve(current.expression)
         for (const clause of current.caseBlock.clauses) {
           if (target !== null && ts.isCaseClause(clause) && ts.isStringLiteralLike(clause.expression)) {
             for (const key of target.keys) {
               recordDiscriminant(key, target.segments.join('.'), clause.expression.text)
             }
+            const caseGuard = {
+              expr: current.expression.getText(source),
+              kind: 'eq',
+              literal: clause.expression.text,
+            }
+            walkStatements(clause.statements,
+              { ...scope, guards: mergeGuards(scope.guards, [caseGuard]) })
+          } else {
+            walkStatements(clause.statements, scope)
           }
-          walk(clause)
         }
-        walk(current.expression)
+        return
+      }
+      if (ts.isForOfStatement(current)) {
+        walk(current.expression, scope)
+        const declarations = ts.isVariableDeclarationList(current.initializer) ? current.initializer.declarations : []
+        const declaration = declarations.length === 1 ? declarations[0] : undefined
+        if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
+          const origin = optionalLeft(current.expression)
+          if (resolve(origin) !== null) {
+            // Element binding context: reads through the loop variable
+            // record the iterated expression and the binding name.
+            walk(current.statement,
+              { ...scope, loop: { binding: declaration.name.text, elementOf: origin.getText(source) } })
+            return
+          }
+        }
+        walk(current.statement, scope)
         return
       }
       // event.type === 'x' / 'x' !== source.kind — a discriminant comparison.
@@ -312,14 +463,36 @@ function analyzeFile(path, root, state) {
       if (ts.isPropertyAccessExpression(current)) {
         const target = resolve(current)
         if (target !== null) {
+          // An optional link (`exec.agent?.id`) narrows its own prefix.
+          const optional = []
+          for (let link = current; ts.isPropertyAccessExpression(link); link = unwrap(link.expression)) {
+            if (link.questionDotToken !== undefined) {
+              optional.push({ expr: link.expression.getText(source), kind: 'defined' })
+            }
+          }
+          const guards = mergeGuards(scope.guards, optional)
           for (const key of target.keys) {
-            recordFieldPath(key, target.segments.join('.'), target.rootType, siteOf(current))
+            recordFieldPath(key, target.segments.join('.'), target.rootType, siteOf(current), guards, scope.loop)
           }
         }
       }
-      ts.forEachChild(current, walk)
+      ts.forEachChild(current, child => walk(child, scope))
     }
-    walk(node.body)
+    /**
+     * A statement list carries guards proven by earlier terminating `if`s
+     * (`if (A || B) return` proves ¬A ∧ ¬B for everything after it).
+     */
+    const walkStatements = (statements, scope) => {
+      let carried = []
+      for (const statement of statements) {
+        walk(statement, { ...scope, guards: mergeGuards(scope.guards, carried) })
+        if (ts.isIfStatement(statement)) {
+          const { negative } = conditionOf(statement.expression)
+          if (negative !== null && terminates(statement.thenStatement)) carried = mergeGuards(carried, negative)
+        }
+      }
+    }
+    walk(node.body, { guards: [], loop: null })
   }
 
   // A `ctx.on` callback is analyzed once, with its event name; visit() below
@@ -862,7 +1035,11 @@ function canonical() {
       const entry = state.fieldPaths[key].get(fieldPath)
       paths[fieldPath] = {
         rootType: [...entry.rootTypes].sort().join('|'),
-        sites: [...entry.sites].sort(bySite),
+        accesses: [...entry.accesses.values()]
+          .sort((a, b) => bySite(a.site, b.site))
+          .map(access => access.elementOf === undefined
+            ? { site: access.site, guards: access.guards }
+            : { site: access.site, guards: access.guards, elementOf: access.elementOf, binding: access.binding }),
       }
     }
     fieldPaths[key] = paths
@@ -945,7 +1122,7 @@ function report(data) {
   lines.push('|---|---|')
   for (const [specifier, paths] of Object.entries(data.fieldPaths)) {
     const cells = Object.entries(paths)
-      .map(([fieldPath, entry]) => `${fieldPath} <sub>${entry.rootType}</sub> (${entry.sites.join(', ')})`)
+      .map(([fieldPath, entry]) => `${fieldPath} <sub>${entry.rootType}</sub> (${entry.accesses.map(access => access.site).join(', ')})`)
     lines.push(`| ${specifier} | ${cells.join('<br>')} |`)
   }
   lines.push('')

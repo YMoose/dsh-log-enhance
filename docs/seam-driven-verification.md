@@ -142,7 +142,7 @@
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 引擎（闭环） | `tests/seam/engine.ts` | 探路插件生成器、tsc 编译验货、真实 `Context` 挂载验货、清单完整性 / `[implicit/intro]` / `[abnormal]` 测试的发射器。只认 `SeamSuite` 数据，不含任何插件知识（不读本仓 `src/`、不写死仓库名） |
-| 标准规格库 | `tests/seam/standard-specs.ts` | 按**上游表面**（`pkg::path`）键控的探针规格：字段探针、判别探针（字面量运行时取自 coupling.json）、不可证豁免、隐性类型片段（键是隐性契约 id）、异常场景。`standardSpecs(coupling, implicitSeams)` 把库与本仓 coupling.json 求交集——碰到哪些上游表面就自动获得哪些标准覆盖，库中未用条目被忽略，不产生假 stale |
+| 标准规格库 | `tests/seam/standard-specs.ts` | **推导不出来**的标准内容：不可证豁免（UNVERIFIABLE，写明"为什么类型上不可能"）、隐性类型片段（键是隐性契约 id）、异常自检场景。字段/判别探针规格已不再手写——见下方"守卫自动提取" |
 | 本仓契约 | `tests/contracts/implicit-seams.ts`（隐性契约登记，路径被 `analyze-dsh-coupling.mjs` 依赖，不能挪）+ `tests/contracts/seam-runs.ts`（本仓探针 `IMPLICIT_RUNS` 与委派引用 `IMPLICIT_DELEGATIONS`） | 一切"读我们 `src/`、断言我们正则与记录 schema、引用我们测试标题"的插件知识 |
 
 装配 API（`tests/seam-verify.test.ts` 薄入口，约 40 行）：
@@ -153,6 +153,24 @@
 - `runSeamSuite(suite)`：发射全部测试——auto field/discriminant/hook、`[auto/plugin]` 挂载、`[intro]` 完整性（下限可用 `suite.inventoryFloors` 覆盖）、implicit 循环（含委派文本断言）、`[implicit/intro]`、`[abnormal]`。
 
 其他仓库接入三步：原样复制 `tests/seam/`（引擎 + 标准规格库）；自写 `tests/contracts/implicit-seams.ts`（自己的隐性契约登记，喂给 `analyze-dsh-coupling.mjs` 与引擎）与 `tests/contracts/seam-runs.ts`（自己的探针与委派）；写一个调用 `runSeamSuite` 的薄入口 `tests/<名>-verify.test.ts`。隐性类型片段按契约 id 复用：登记同名 id（如 `subagent-settled-surface`）即自动获得对应片段。挂载验货的 inject 清单从 coupling.json 的 `injectedServices` 推导，无需改引擎。
+
+---
+
+## 守卫自动提取（2026-11-13）
+
+探针的收窄 prelude 曾经是 `standard-specs.ts` 里的手写字典，它漂移于插件的真实用法——三个已核实的漂移案例（对照 `src/observer.ts`）：
+
+1. `sourceEventSeqs` 只在 `case 'tool/result'`（:105）里被读，字典却按 `user/message` 收窄探针——上游把字段从 tool/result 挪走，探针照绿，插件照坏；
+2. `data.turn` 在 :100（tool/call）与 :107（step/start）被读，字典探的是插件根本不监听的 `turn/start`——完全探错对象；
+3. `data.step` 漏掉 :100 的 tool/call 读取。
+
+根因：本插件是 DeepSeek Harness 的**消费者**，接触面验货必须反映"插件实际怎么用上游"，而不是人对上游形状的转述。字典已死：扫描器（`analyze-dsh-coupling.mjs`）现在从插件自己的源码里提取**每次字段读取的守卫上下文**，记进 coupling.json 的 fieldPaths——`{ rootType, accesses: [{ site, guards, elementOf?, binding? }] }`，守卫是源码文本表达式 `{ expr, kind: eq|ne|defined|falsy, literal? }`。引擎的 `probeSpecsFromCoupling()` 把每条访问记录机械变成一个探针规格（每个访问点一个测试，数量随读取点增长），`standardSpecs()` 只保留推导不出的三块（豁免理由、隐性类型片段、异常自检）。
+
+提取的语法形状（纯语法层，扫描器不加 Program/TypeChecker）：字面量比较（`===`/`!==`，含 switch case 标签——case 守卫止于下一 clause，落空继承守卫按保守处理）；`=== undefined` / `!== undefined`；对被追踪链的真值判断（`if (!exec.agent) return` ⇒ `defined`）；复合条件（`A && B` 守卫 then 块 ⇒ 两条守卫；`A || B` 出现在终止语句里 ⇒ 各取反守卫其后的代码；取反后不可表达的合取项被丢弃——**少记守卫只会让探针更宽**）。可选链（`exec.agent?.id`）自带其前缀的 defined 守卫；`for…of` 记录元素来源与绑定名。
+
+语义校验留给流水线末端的 tsc 编译：漏提守卫 ⇒ 探针收窄不足 ⇒ 编译失败 ⇒ 响亮暴露（安全方向），绝不静默变绿。守卫里引用探针参数之外变量（跨根，如 `result` 探针里的 `exec.name`）或局部别名（如 `manager`）的，只进标题摘要、不回放进 prelude——回放需要第二参数的根类型，而清单只记路径级根类型。
+
+逃生口：`SeamSuite.overrides`，键 `pkg::path@site`（只换该访问点的规格）或裸 `pkg::path`（整条路径只留一份），替换机械生成的规格——用于提取器暂不覆盖的形状（如嵌套循环元素链）。本仓今天为空；若哪天非空，那就是提取器的缺口信号。回归锚：`tests/guard-extraction.test.ts`（红→绿过程：字典时代三条断言全红，机械生成后全绿）。
 
 ---
 
