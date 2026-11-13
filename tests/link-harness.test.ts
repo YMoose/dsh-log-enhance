@@ -52,7 +52,7 @@ const projectDevDeps = Object.entries(
 
 test('link-harness stays quiet when the checkout matches the devDeps train', () => {
   const packages = Object.fromEntries(projectDevDeps)
-  const harness = makeCheckout('0.2.2-rc.1', packages)
+  const harness = makeCheckout('0.2.2-rc.3', packages)
   try {
     const result = run(harness)
     assert.equal(result.status, 0, result.stderr)
@@ -66,13 +66,13 @@ test('link-harness stays quiet when the checkout matches the devDeps train', () 
 test('link-harness warns, but does not fail, when a checkout package differs from devDeps', () => {
   const packages = Object.fromEntries(projectDevDeps)
   packages['@deepseek-ai/dsh-subagent'] = '0.2.1-rc.4' // an older train
-  const harness = makeCheckout('0.2.2-rc.1', packages)
+  const harness = makeCheckout('0.2.2-rc.3', packages)
   try {
     const result = run(harness)
     assert.equal(result.status, 0, 'a version mismatch must not hard-fail the link')
     assert.match(result.stderr, /warning: @deepseek-ai\/dsh-subagent: checkout has 0\.2\.1-rc\.4/)
     // The warning must name both sides so the developer can act on it.
-    assert.match(result.stderr, /0\.2\.2-rc\.1/)
+    assert.match(result.stderr, /0\.2\.2-rc\.3/)
   } finally {
     rmSync(harness, { recursive: true, force: true })
   }
@@ -84,7 +84,7 @@ test('link-harness warns when the checkout root release differs from the pinned 
   try {
     const result = run(harness)
     assert.equal(result.status, 0)
-    assert.match(result.stderr, /harness root is 0\.3\.0-rc\.1 but the pinned train is 0\.2\.2-rc\.1/)
+    assert.match(result.stderr, /harness root is 0\.3\.0-rc\.1 but the pinned train is 0\.2\.2-rc\.3/)
   } finally {
     rmSync(harness, { recursive: true, force: true })
   }
@@ -93,7 +93,7 @@ test('link-harness warns when the checkout root release differs from the pinned 
 test('link-harness names a devDependency the checkout does not provide', () => {
   const packages = Object.fromEntries(projectDevDeps)
   delete packages['@deepseek-ai/dsh-tool-subagent-control']
-  const harness = makeCheckout('0.2.2-rc.1', packages)
+  const harness = makeCheckout('0.2.2-rc.3', packages)
   try {
     const result = run(harness)
     assert.equal(result.status, 0)
@@ -105,7 +105,7 @@ test('link-harness names a devDependency the checkout does not provide', () => {
 
 test('link-harness ignores non-exact devDeps pins instead of inventing an expected version', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-link-manifest-'))
-  const harness = makeCheckout('0.2.2-rc.1', Object.fromEntries(projectDevDeps))
+  const harness = makeCheckout('0.2.2-rc.3', Object.fromEntries(projectDevDeps))
   try {
     const manifest = join(dir, 'package.json')
     writeFileSync(manifest, `${JSON.stringify({

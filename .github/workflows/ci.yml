@@ -63,4 +63,4 @@ jobs:
         uses: bowenliang123/dsh-plugin-checker@e19b9d2f33a0bd3b9636670e4d2525f3ef8ecfb7
         with:
           rootPath: smoke/package
-          dshVersion: 0.2.2-rc.1
+          dshVersion: 0.2.2-rc.3
