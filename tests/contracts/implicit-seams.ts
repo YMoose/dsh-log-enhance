@@ -45,12 +45,14 @@ export interface ImplicitSeam {
 export const IMPLICIT_SEAMS: ImplicitSeam[] = [
   {
     id: 'version-lockstep',
-    description: 'engines.dsh 下界、baseline.json 的 train、CI 的 dshVersion 指同一个验证基线；'
-      + '三者任意一处先行，验证列车就不再是被验证过的那一版。',
+    description: 'engines.dsh 下界、devDependencies 列车、baseline.json 的 train 指同一个验证基线；'
+      + 'workflow 不携带版本号——版本状态只存在于 package.json 与 baseline.json'
+      + '（bump-upstream.mjs 写模式会连同 engines.dsh 一起推进）。任一处先行，'
+      + '验证列车就不再是被验证过的那一版。',
     usedAt: 'package.json:engines.dsh',
     auditSection: 'versioning.md §2',
-    probe: 'assert engines.dsh floor === baseline train === ci dshVersion',
-    acknowledged: ['package.json', 'baseline.json', '.github/workflows/ci.yml'],
+    probe: 'assert engines.dsh floor === devDeps train === baseline train; assert workflows carry no version pin',
+    acknowledged: ['package.json', 'baseline.json'],
   },
   {
     id: 'session-file-layout',

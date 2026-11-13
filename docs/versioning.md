@@ -85,8 +85,8 @@ CI 配置本身不是证据）：
 | 阶段 | 触发 | 内容 | 参考实现 |
 |---|---|---|---|
 | S0 本地基线 | — | lockfile、engines.dsh、版本单源、baseline 机制、修集成测试 | 本文 |
-| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测 → 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → `npm pack` 产物安装冒烟 | dsh-plugin-checker（**SHA pin + 显式 `dshVersion`**，勿用其默认 latest） |
-| S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或同版本重发布**都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` → 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的全部材料，跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
+| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测（含 seam-verify 探针）→ 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → coupling 门禁 → `npm pack` 产物冒烟 | 本仓 `ci.yml`（2026-11-13 起不再用第三方 dsh-plugin-checker：真实挂载由 seam-verify + 集成测试覆盖，workflow 不携带版本号） |
+| S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或任一列车成员同版本重发布**（主包 + 全部 dsh-* 子包逐一比对，不只主包）都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`；devDeps 与 engines.dsh **同一次原子推进**，上界随次 minor 重算 `-0`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` → 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的**全部**材料（engines.dsh 已随 bump 推进，无需手改任何文件），跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
 | S3 多线兼容矩阵 | ✗ **已取消**（2026-11-13 定策：单线跟随，见下） | ~~对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆~~（原方案存档备查） | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
 
 > **维护策略（2026-11-13 定）——单线跟随**：只保证插件在 dist-tag `next` 的**最新发版**上可跑，能跑即可。不做多版本矩阵（S3 取消）；不跟上游 master（绊线只看 registry 元数据，本就与上游 git 仓库无关）。上游发新版 → 绊线触发 → Canary 全量验证 → 绿则产出 artifact，人工决定何时收编。
@@ -162,11 +162,13 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    （钉安装内容，防同版本重发布）、`scripts/check-compat.mjs`（官方兼容门自检）、
    `scripts/analyze-dsh-coupling.mjs`（默认模式出自家耦合草表，`--write` 固化）、
    `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
-   第三方 action 一律 SHA pin；checker 步的 `dshVersion` 对齐自家验证线。
+   第三方 action 一律 SHA pin（本仓现已不依赖任何第三方 action）；workflow 里
+   不出现版本号——版本状态只在 package.json 与 baseline.json。
    接入后手动 `workflow_dispatch` 跑一次 canary，链路通了才算闭环。
 
-随配方一起迁移的两条纪律：**三处同步**（engines.dsh 下界 = checker `dshVersion` =
-baseline 指纹，一起改）；**重验流程**（baseline/coupling 红了走 §5 重核上游契约，
+随配方一起迁移的两条纪律：**两处同步**（engines.dsh 下界 = baseline 指纹；
+`bump-upstream.mjs` 写模式把 devDeps 与 engines.dsh 一起推进，收编时核对
+baseline 重锚即可）；**重验流程**（baseline/coupling 红了走 §5 重核上游契约，
 不是重写文件让它变绿）。耦合草表的层 2 部分（读盘格式与语义契约）各家不同，
 照 [upstream-audit.md](upstream-audit.md) §0 的分层体例手写。
 
@@ -185,6 +187,7 @@ baseline 指纹，一起改）；**重验流程**（baseline/coupling 红了走 
   bump-upstream.mjs）、030611/dsh-telemetry-redactor（宿主包内容 sha256 fixture）、
   beibeihk/dsh-agent-observability（带日期证据文档）、bowenliang123/dsh-context
   （基线 tag 宿主源码矩阵、OIDC 发布、tag↔版本断言）、bowenliang123/dsh-plugin-checker
-  （安装冒烟 action，休眠中——必须 SHA pin）
+  （安装冒烟 action，休眠中——2026-11-13 起本仓弃用：seam-verify 探针 + 集成测试
+  覆盖更深的挂载面，且 workflow 无需携带版本号）
 - npm dist-tag 陷阱：`@deepseek-ai/dsh` latest=next=0.2.2-rc.1，但多数子包
   latest 卡死 0.0.1-rc.1

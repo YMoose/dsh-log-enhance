@@ -753,8 +753,14 @@ async function probeVersionLockstep(): Promise<void> {
   assert.equal(train.size, 1, `devDependencies must pin exactly one dsh train: ${[...train].join(', ')}`)
   assert.equal([...train][0], floor, 'engines.dsh floor and the devDependency train must agree')
 
-  const pinned = /dshVersion:\s*(\S+)/.exec(readText('.github/workflows/ci.yml'))?.[1]
-  assert.equal(pinned, floor, 'CI dshVersion must equal the engines.dsh floor')
+  // Workflows carry no version of their own (single-line follow): the manifest
+  // and baseline.json are the ONLY version state, so a re-pinned dshVersion
+  // in a workflow would be a silent extra copy of the truth drifting free.
+  assert.doesNotMatch(
+    readText('.github/workflows/ci.yml'),
+    /dshVersion:\s*\S/,
+    'ci.yml must not pin a dsh version — package.json + baseline.json are the only version state',
+  )
 
   const baseline = JSON.parse(readText('baseline.json')) as { packages: Record<string, { version: string }> }
   const fingerprinted = new Set(

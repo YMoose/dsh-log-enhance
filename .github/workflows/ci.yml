@@ -46,21 +46,17 @@ jobs:
       - name: Pack the publishable tarball
         run: npm pack --pack-destination "$RUNNER_TEMP"
 
-      - name: Unpack the tarball for the install smoke test
+      - name: Unpack the tarball and verify the shipped file set
         run: |
           mkdir smoke
           tar -xzf "$RUNNER_TEMP"/dsh-log-enhance-*.tgz -C smoke
           test -f smoke/package/package.json
+          test -f smoke/package/cordis.patch.yml
 
-      # Install smoke test of the PACKED artifact. The checker action has no
-      # tarball input (rootPath is a directory), so it runs against the
-      # unpacked tarball — exactly the file set an npm publish would ship.
-      # dshVersion is the current verification baseline and must be bumped in
-      # lockstep with engines.dsh's lower bound and the devDependency train
-      # fingerprinted in baseline.json (three places, changed together).
-      - name: Install the packed plugin with dsh and verify the layer mounts
-        # repo head 2026-08-18 (dormant upstream — never reference by tag)
-        uses: bowenliang123/dsh-plugin-checker@e19b9d2f33a0bd3b9636670e4d2525f3ef8ecfb7
-        with:
-          rootPath: smoke/package
-          dshVersion: 0.2.2-rc.3
+      # Real host mounting is NOT checked through a third-party action: the
+      # seam-verify probe plugin (real Context + real upstream declarations)
+      # and the loader-based integration tests own that surface, and they run
+      # on every train the CI touches. Workflows carry no version pin at all
+      # (single-line follow): the only version state is package.json — the
+      # devDeps train and engines.dsh, moved together by
+      # scripts/bump-upstream.mjs — plus baseline.json.

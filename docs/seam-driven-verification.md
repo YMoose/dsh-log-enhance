@@ -51,7 +51,9 @@
 **原则**：只写机器从我们代码里绝对看不出来的东西。
 
 人工维护 `tests/contracts/implicit-seams.ts`，登记以下隐性契约：
-1. **版本号三处对齐**：`engines.dsh` 下界 == `baseline.json` 列车 == `ci.yml` 的 `dshVersion`
+1. **版本号三处对齐**：`engines.dsh` 下界 == devDependencies 列车 == `baseline.json` 列车。
+   workflow 不携带版本号——版本状态只在 package.json 与 baseline.json，
+   `bump-upstream.mjs` 写模式把 devDeps 与 `engines.dsh` 原子推进（上界随次 minor 重算）
 2. **磁盘格式**：`SESSION_FORMAT_VERSION === 4`、`KNOWN_SESSION_EVENT_TYPES` 覆盖我们消费的事件
 3. **对象引用恒等**：`tools/pre-execute` 与 `tools/result` 收到的 `exec` 满足 `===` 引用相等
 4. **回执位置**：`send_message` 成功时 `result.value.messageId` 有值，且不进原生 `tool/result`
