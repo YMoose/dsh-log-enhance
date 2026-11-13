@@ -1,12 +1,15 @@
 # S2 upstream canary — see docs/versioning.md §4.
 #
 # The daily tripwire is stateless: the committed baseline IS the state. The
-# full canary runs only when the dsh train moved (dist-tag `next`) or a
-# same-version republish refreshed registry publish times after
-# baseline.json's generatedAt — the two signals a version string alone can
-# never show. Monday's backstop runs unconditionally. On green, the uploaded
-# artifact is exactly the revalidation commit of docs/versioning.md §5;
-# following upstream stays a conscious human decision — no auto-PR by design.
+# full canary runs only when the dsh train moved (dist-tag `next`) or any
+# train member was republished under the same version after baseline.json's
+# generatedAt — the two signals a version string alone can never show.
+# Monday's backstop runs unconditionally. A green canary runs the SAME gate
+# surface as S1 (typecheck+tests+build, official compat gate, coupling gate,
+# pack smoke) against the new train; the uploaded artifact is then exactly
+# the revalidation commit of docs/versioning.md §5 — engines.dsh moved with
+# the bump, so nothing is left to edit by hand. Following upstream stays a
+# conscious human decision — no auto-PR by design.
 name: canary
 
 on:
@@ -52,10 +55,15 @@ jobs:
 
   canary:
     needs: tripwire
+    # Any scheduled run that is NOT the daily tripwire cron is the weekly
+    # backstop. This reads the schedule list, not a duplicated cron literal:
+    # editing the Monday time in on.schedule can never silently disable the
+    # backstop, and editing the daily time without this file's literal only
+    # makes the backstop run more often (loud, never less).
     if: >-
       needs.tripwire.outputs.changed == 'yes'
       || github.event_name == 'workflow_dispatch'
-      || github.event.schedule == '37 4 * * 1'
+      || (github.event_name == 'schedule' && github.event.schedule != '23 4 * * *')
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -85,6 +93,21 @@ jobs:
 
       - name: Official compatibility gate against the new train
         run: npm run check:compat
+
+      # Same gate surface as S1 from here on (review P3): a green canary
+      # must mean the same thing a green S1 run means, on the NEW train.
+      - name: Gate the coupling inventory against coupling.json
+        run: node scripts/analyze-dsh-coupling.mjs --check
+
+      - name: Pack the publishable tarball
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+
+      - name: Unpack the tarball and verify the shipped file set
+        run: |
+          mkdir smoke
+          tar -xzf "$RUNNER_TEMP"/dsh-log-enhance-*.tgz -C smoke
+          test -f smoke/package/package.json
+          test -f smoke/package/cordis.patch.yml
 
       - name: Record the resolved train in the run summary
         run: |
