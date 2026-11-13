@@ -157,10 +157,13 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    peers 只留真实共享实例的运行时依赖（通常 cordis + schemastery）。
 3. **传感器**：至少一条真的碰宿主 API 的集成测试（hook 或读盘格式）。这是唯一
    不能抄的部分——测试存在，门禁与 canary 才有意义。
-4. **复制五个文件 + 两个 workflow**：`scripts/bump-upstream.mjs`（跟上游，dist-tag
+4. **复制五个文件 + `tests/seam/` + 两个 workflow**：`scripts/bump-upstream.mjs`（跟上游，dist-tag
    陷阱编码在头部注释）、`scripts/write-baseline.mjs` + `tests/baseline.test.ts`
    （钉安装内容，防同版本重发布）、`scripts/check-compat.mjs`（官方兼容门自检）、
    `scripts/analyze-dsh-coupling.mjs`（默认模式出自家耦合草表，`--write` 固化）、
+   `tests/seam/`（接触面验货引擎 + 标准规格库，见
+   [seam-driven-verification.md](seam-driven-verification.md)；接入仓自写
+   `tests/contracts/{implicit-seams,seam-runs}.ts` 与一个调 `runSeamSuite` 的薄入口）、
    `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
    第三方 action 一律 SHA pin（本仓现已不依赖任何第三方 action）；workflow 里
    不出现版本号——版本状态只在 package.json 与 baseline.json。

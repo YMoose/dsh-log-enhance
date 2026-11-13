@@ -135,6 +135,27 @@
 
 ---
 
+## 引擎 / 标准规格库 / 本仓契约（2026-11-13 拆分）
+
+`tests/seam-verify.test.ts` 原是 1100+ 行的单文件；现已拆成三层，开放扩展、关闭修改——另一个 dsh 插件仓库原样复制 `tests/seam/` 即可接入：
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| 引擎（闭环） | `tests/seam/engine.ts` | 探路插件生成器、tsc 编译验货、真实 `Context` 挂载验货、清单完整性 / `[implicit/intro]` / `[abnormal]` 测试的发射器。只认 `SeamSuite` 数据，不含任何插件知识（不读本仓 `src/`、不写死仓库名） |
+| 标准规格库 | `tests/seam/standard-specs.ts` | 按**上游表面**（`pkg::path`）键控的探针规格：字段探针、判别探针（字面量运行时取自 coupling.json）、不可证豁免、隐性类型片段（键是隐性契约 id）、异常场景。`standardSpecs(coupling, implicitSeams)` 把库与本仓 coupling.json 求交集——碰到哪些上游表面就自动获得哪些标准覆盖，库中未用条目被忽略，不产生假 stale |
+| 本仓契约 | `tests/contracts/implicit-seams.ts`（隐性契约登记，路径被 `analyze-dsh-coupling.mjs` 依赖，不能挪）+ `tests/contracts/seam-runs.ts`（本仓探针 `IMPLICIT_RUNS` 与委派引用 `IMPLICIT_DELEGATIONS`） | 一切"读我们 `src/`、断言我们正则与记录 schema、引用我们测试标题"的插件知识 |
+
+装配 API（`tests/seam-verify.test.ts` 薄入口，约 40 行）：
+
+- `findRepositoryRoot(packageName?)` / `loadCoupling(root)`：定位仓库根、解析 coupling.json；
+- `standardSpecs(coupling, implicitSeams)`：标准库 ∩ 本仓耦合面；
+- `standardRuns`：引擎自带的与仓库无关的探针（目前仅 `version-lockstep` 版本三锁，只读 package.json / baseline.json / ci.yml），薄入口按本仓登记的契约 id 挑选合并；
+- `runSeamSuite(suite)`：发射全部测试——auto field/discriminant/hook、`[auto/plugin]` 挂载、`[intro]` 完整性（下限可用 `suite.inventoryFloors` 覆盖）、implicit 循环（含委派文本断言）、`[implicit/intro]`、`[abnormal]`。
+
+其他仓库接入三步：原样复制 `tests/seam/`（引擎 + 标准规格库）；自写 `tests/contracts/implicit-seams.ts`（自己的隐性契约登记，喂给 `analyze-dsh-coupling.mjs` 与引擎）与 `tests/contracts/seam-runs.ts`（自己的探针与委派）；写一个调用 `runSeamSuite` 的薄入口 `tests/<名>-verify.test.ts`。隐性类型片段按契约 id 复用：登记同名 id（如 `subagent-settled-surface`）即自动获得对应片段。挂载验货的 inject 清单从 coupling.json 的 `injectedServices` 推导，无需改引擎。
+
+---
+
 ## 能包住什么？包不住什么？
 
 ### ✅ 能被这套机制包住的部分（约 70%）

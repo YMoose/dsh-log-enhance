@@ -14,9 +14,10 @@
         "tests": {
           "type": [],
           "value": [
+            "tests/contracts/seam-runs.ts",
             "tests/integration/harness.test.ts",
             "tests/integration/mcp-mount.test.ts",
-            "tests/seam-verify.test.ts"
+            "tests/seam/engine.ts"
           ]
         }
       }
@@ -120,9 +121,9 @@
             "tests/integration/harness.test.ts"
           ],
           "value": [
+            "tests/contracts/seam-runs.ts",
             "tests/integration/harness.test.ts",
-            "tests/integration/mcp-mount.test.ts",
-            "tests/seam-verify.test.ts"
+            "tests/integration/mcp-mount.test.ts"
           ]
         }
       }
@@ -206,8 +207,8 @@
         "tests": {
           "type": [],
           "value": [
-            "tests/integration/harness.test.ts",
-            "tests/seam-verify.test.ts"
+            "tests/contracts/seam-runs.ts",
+            "tests/integration/harness.test.ts"
           ]
         }
       }
@@ -368,20 +369,22 @@
     ],
     "mcpManager": [
       "src/index.ts",
-      "tests/seam-verify.test.ts"
+      "tests/contracts/seam-runs.ts"
     ],
     "on": [
       "src/index.ts",
       "tests/integration/harness.test.ts"
     ],
     "plugin": [
+      "tests/contracts/seam-runs.ts",
       "tests/integration/harness.test.ts",
       "tests/integration/mcp-mount.test.ts",
-      "tests/seam-verify.test.ts"
+      "tests/seam/engine.ts"
     ],
     "provide": [
+      "tests/contracts/seam-runs.ts",
       "tests/integration/mcp-mount.test.ts",
-      "tests/seam-verify.test.ts"
+      "tests/seam/engine.ts"
     ],
     "subagents": [
       "tests/integration/harness.test.ts"
