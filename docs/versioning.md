@@ -86,9 +86,14 @@ CI 配置本身不是证据）：
 | S0 本地基线 | — | lockfile、engines.dsh、版本单源、baseline 机制、修集成测试 | 本文 |
 | S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测 → 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → `npm pack` 产物安装冒烟 | dsh-plugin-checker（**SHA pin + 显式 `dshVersion`**，勿用其默认 latest） |
 | S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或同版本重发布**都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` → 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的全部材料，跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
-| S3 多线兼容矩阵 | 新版本发布 / 手动 | 对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆 | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
+| S3 多线兼容矩阵 | ✗ **已取消**（2026-11-13 定策：单线跟随，见下） | ~~对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆~~（原方案存档备查） | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
 
-信号源优先级（S2/S3 触发用）：
+> **维护策略（2026-11-13 定）——单线跟随**：只保证插件在 dist-tag `next` 的**最新发版**上可跑，能跑即可。不做多版本矩阵（S3 取消）；不跟上游 master（绊线只看 registry 元数据，本就与上游 git 仓库无关）。上游发新版 → 绊线触发 → Canary 全量验证 → 绿则产出 artifact，人工决定何时收编。
+>
+> **定策背景**：DSH 尚处 Demo 阶段——快速迭代、无稳定版线、对外不作兼容承诺（0.x rc 乱序、同版本重发均有先例）；本插件同处 Demo 阶段，选择随其共同演进，只对齐最新发版，不透支承诺。
+> **复审触发**：上游宣布稳定版 / semver 承诺（如发 1.0）时，重估是否放宽 engines 声明、降低绊线频率乃至恢复多线验证。
+
+信号源优先级（S2 触发用）：
 
 1. npm dist-tags 轮询（`registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags`，
    认 `next`；同一响应的 `time` 字段顺带检测同版本重发布）；
