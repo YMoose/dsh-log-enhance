@@ -16,7 +16,7 @@
 **2026-11-13 新增**：层 2 现在通过**嫌疑扫描 + 人工盖章**机制部分自动化：
 - `analyze-dsh-coupling.mjs` 自动识别"疑似隐性契约"的代码形状（无类型字段读取、正则表达式、WeakMap 引用假设、try-cast-ctx）
 - 人工在 `tests/contracts/implicit-seams.ts` 里盖章（绑定探针或标记 internal）
-- 未盖章的嫌疑项打印报备单（第一版不 exit 1）
+- 未盖章的嫌疑项在 `--check` 下**直接判红**（同日由报备升级为硬门禁：阶段 B 已落地，报备单无人保证被看到；清单本身不可读同样判红）
 
 详见 [接触面驱动的插件兼容性验证机制](seam-driven-verification.md)。
 

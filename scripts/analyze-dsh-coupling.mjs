@@ -33,8 +33,9 @@
  * over log text, a WeakMap keyed by an upstream object, a service probed
  * through a cast inside `try`. Those shapes are reported in `--check` against
  * `tests/contracts/implicit-seams.ts`: every suspect must be acknowledged by a
- * seam id or explicitly ignored as internal. This is a report, not a gate (yet):
- * the shape is evidence of a bet, not a defect.
+ * seam id or explicitly ignored as internal — in `--check` an unacknowledged
+ * suspect (or an unloadable registry) fails the gate; the shape is evidence
+ * of a bet, not a defect, so the default mode still just prints the draft.
  *
  * Modes:
  *   (default)  print a markdown draft report to stdout.
@@ -42,9 +43,13 @@
  *   --check    regenerate and deep-compare against `coupling.json`; any drift
  *              (new hook, new value import, new field path) exits 1 — a
  *              coupling change must be a conscious update, mirroring what
- *              baseline.json does for dependency content. Also prints the
- *              implicit-contract suspect report; unacknowledged suspects are
- *              advisory only and never change the exit code.
+ *              baseline.json does for dependency content. The implicit-contract
+ *              suspect report gates the same run: an unacknowledged suspect or
+ *              an unreadable tests/contracts/implicit-seams.ts also exits 1.
+ *
+ * Testability: DSH_LOG_ENHANCE_ROOT redirects the repo root (coupling.json,
+ * the source roots, and the seam registry all resolve under it — fixture
+ * roots in tests/coupling-gate.test.ts).
  *
  * Reusable in any dsh plugin repo as-is: the package scope and the three
  * source roots are the only conventions.
@@ -53,14 +58,16 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const SCOPE = '@deepseek-ai/'
 const ROOTS = ['src', 'tests', 'scripts']
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
-const COUPLING_URL = new URL('../coupling.json', import.meta.url)
+const REPO_ROOT = process.env.DSH_LOG_ENHANCE_ROOT
+  ? resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_ROOT)
+  : fileURLToPath(new URL('..', import.meta.url))
+const COUPLING_URL = join(REPO_ROOT, 'coupling.json')
 const MANIFEST_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies']
 
 const args = process.argv.slice(2)
@@ -731,8 +738,11 @@ async function loadRegistry() {
 }
 
 /**
- * Compare the scanned suspects with the registry. The return value is the
- * advisory text for `--check`; it never raises the exit code on its own.
+ * Compare the scanned suspects with the registry. Returns the report text
+ * plus what the `--check` gate rules on: a suspect shape that no seam
+ * acknowledges (and no entry ignores) FAILS the gate, and so does a registry
+ * that cannot be loaded — an unverifiable report must never read as "all
+ * acknowledged".
  */
 function suspectSection(suspects, registry) {
   const lines = []
@@ -743,13 +753,13 @@ function suspectSection(suspects, registry) {
   lines.push('')
   lines.push('代码形状由 `scripts/analyze-dsh-coupling.mjs` 提取；每处嫌疑必须在 '
     + '`tests/contracts/implicit-seams.ts` 里绑定到一条隐性契约，或标为 internal。'
-    + '本段只报备，不改变退出码。')
+    + '`--check` 模式下未报备（或清单不可读）直接判红；默认模式仅打印草表。')
   lines.push('')
 
   if (registry.error !== null) {
     lines.push(`⚠️  无法读取隐性契约清单：${registry.error}`)
     lines.push('')
-    return lines.join('\n')
+    return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: registry.error }
   }
 
   const acknowledged = registry.specifications.filter(specification => specification.effect === 'acknowledged')
@@ -777,7 +787,7 @@ function suspectSection(suspects, registry) {
   }
 
   lines.push('')
-  return lines.join('\n')
+  return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: null }
 }
 
 // --- orchestration --------------------------------------------------------------
@@ -1006,17 +1016,28 @@ if (MODE === 'write') {
     console.error('若是有意的耦合变更：review 默认模式的草表后 --write 固化；否则这是意外耦合，先改代码。')
   }
 
-  // Advisory: the drift gate above is mechanical; implicit contracts are not.
-  // Print the reporting sheet even when the gate fails, so one run shows both.
+  // Implicit-contract suspect gate: every suspect shape must be bound to a
+  // seam or explicitly ignored, and the registry must be loadable at all.
+  // Printed even when the drift gate above failed, so one run shows both.
   const suspects = implicitSuspects()
   const registry = await loadRegistry()
+  const suspectReport = suspectSection(suspects, registry)
   console.log('')
-  console.log(suspectSection(suspects, registry))
+  console.log(suspectReport.text)
+  if (suspectReport.registryError !== null) {
+    console.error(`FAIL cannot verify implicit-contract suspects: ${suspectReport.registryError}`)
+    process.exit(1)
+  }
+  if (suspectReport.unaccounted > 0) {
+    console.error(`FAIL ${suspectReport.unaccounted} unacknowledged implicit-contract suspect(s) listed above — ` +
+      'bind each to a seam in tests/contracts/implicit-seams.ts or mark it internal')
+    process.exit(1)
+  }
 
   if (drifted.length > 0) process.exit(1)
 } else {
   console.log(report(data))
   const suspects = implicitSuspects()
   const registry = await loadRegistry()
-  console.log(suspectSection(suspects, registry))
+  console.log(suspectSection(suspects, registry).text)
 }

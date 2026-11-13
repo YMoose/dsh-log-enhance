@@ -122,7 +122,7 @@ CI 配置本身不是证据）：
 **2026-11-13 新增**：接触面驱动的验货机制（详见 [seam-driven-verification.md](seam-driven-verification.md)）：
 - `tests/seam-verify.test.ts` 读取 `coupling.json`（显性层）+ `implicit-seams.ts`（隐性层），生成探路插件并跑 tsc + Context 挂载
 - 每条测试以 `[层] 接触面 (at src/xxx:行号) -> Audit §章节` 命名，哪条红了直接报出是哪条接触面坏了
-- 隐性嫌疑扫描（`analyze-dsh-coupling.mjs --check`）自动识别未报备的疑似隐性契约，向人报备
+- 隐性嫌疑扫描（`analyze-dsh-coupling.mjs --check`）自动识别未报备的疑似隐性契约：**未报备（或清单不可读）直接判红**，不再是只打印的报备单
 
 禁止：直接重写 baseline.json 让测试变绿；跳过矩阵更新；
 在未重核契约的情况下"按报错猜"修改插件行为。
