@@ -236,6 +236,11 @@
       }
     }
   },
+  "injectedServices": [
+    "agents",
+    "sessions",
+    "tools"
+  ],
   "srcHooks": [
     {
       "event": "agent/inbox/claimed",
@@ -350,49 +355,406 @@
     ]
   },
   "fieldPaths": {
-    "@deepseek-ai/cordis": [
-      "effect",
-      "logger",
-      "logger.info",
-      "logger.warn",
-      "on"
-    ],
-    "@deepseek-ai/dsh-agent": [
-      "id",
-      "session"
-    ],
-    "@deepseek-ai/dsh-session": [
-      "data",
-      "data.callId",
-      "data.id",
-      "data.inserted",
-      "data.name",
-      "data.source",
-      "data.source.kind",
-      "data.source.senderSessionId",
-      "data.step",
-      "data.turn",
-      "firstLiveSeq",
-      "header",
-      "header.version",
-      "id",
-      "isOwnSeq",
-      "seq",
-      "sourceEventSeqs",
-      "surfaceOp",
-      "type"
-    ],
-    "@deepseek-ai/dsh-tools": [
-      "agent",
-      "agent.id",
-      "agent.session",
-      "callId",
-      "isError",
-      "name",
-      "parent",
-      "value",
-      "value.messageId",
-      "value.messageId.length"
-    ]
+    "@deepseek-ai/cordis": {
+      "effect": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:97",
+          "src/index.ts:111"
+        ]
+      },
+      "logger": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:98",
+          "src/index.ts:100",
+          "src/index.ts:107",
+          "src/index.ts:116"
+        ]
+      },
+      "logger.info": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:98"
+        ]
+      },
+      "logger.warn": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:100",
+          "src/index.ts:107",
+          "src/index.ts:116"
+        ]
+      },
+      "mcpManager": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:84"
+        ]
+      },
+      "mcpManager.register": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:89"
+        ]
+      },
+      "on": {
+        "rootType": "Context",
+        "sites": [
+          "src/index.ts:119",
+          "src/index.ts:120",
+          "src/index.ts:124",
+          "src/index.ts:125",
+          "src/index.ts:128",
+          "src/index.ts:131"
+        ]
+      }
+    },
+    "@deepseek-ai/dsh-agent": {
+      "id": {
+        "rootType": "Agent",
+        "sites": [
+          "src/observer.ts:180",
+          "src/observer.ts:191"
+        ]
+      },
+      "session": {
+        "rootType": "Agent",
+        "sites": [
+          "src/observer.ts:167",
+          "src/observer.ts:175",
+          "src/observer.ts:188"
+        ]
+      }
+    },
+    "@deepseek-ai/dsh-session": {
+      "data": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:99",
+          "src/observer.ts:100",
+          "src/observer.ts:107",
+          "src/observer.ts:111",
+          "src/observer.ts:121",
+          "src/observer.ts:122",
+          "src/observer.ts:125"
+        ]
+      },
+      "data.callId": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:100"
+        ]
+      },
+      "data.id": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:122"
+        ]
+      },
+      "data.inserted": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:111"
+        ]
+      },
+      "data.inserted[].id": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:113",
+          "src/observer.ts:117"
+        ]
+      },
+      "data.inserted[].source": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:112",
+          "src/observer.ts:114"
+        ]
+      },
+      "data.inserted[].source.kind": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:112"
+        ]
+      },
+      "data.inserted[].source.senderSessionId": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:114"
+        ]
+      },
+      "data.name": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:99"
+        ]
+      },
+      "data.source": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:121",
+          "src/observer.ts:125"
+        ]
+      },
+      "data.source.kind": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:121"
+        ]
+      },
+      "data.source.senderSessionId": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:125"
+        ]
+      },
+      "data.step": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:100",
+          "src/observer.ts:107"
+        ]
+      },
+      "data.turn": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:100",
+          "src/observer.ts:107"
+        ]
+      },
+      "firstLiveSeq": {
+        "rootType": "Session",
+        "sites": [
+          "src/observer.ts:94"
+        ]
+      },
+      "header": {
+        "rootType": "Session",
+        "sites": [
+          "src/observer.ts:82"
+        ]
+      },
+      "header.version": {
+        "rootType": "Session",
+        "sites": [
+          "src/observer.ts:82"
+        ]
+      },
+      "id": {
+        "rootType": "Session",
+        "sites": [
+          "src/observer.ts:82",
+          "src/observer.ts:126"
+        ]
+      },
+      "isOwnSeq": {
+        "rootType": "Session",
+        "sites": [
+          "src/observer.ts:94"
+        ]
+      },
+      "seq": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:82",
+          "src/observer.ts:94"
+        ]
+      },
+      "sourceEventSeqs": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:105"
+        ]
+      },
+      "surfaceOp": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:121"
+        ]
+      },
+      "type": {
+        "rootType": "SessionEvent",
+        "sites": [
+          "src/observer.ts:97"
+        ]
+      }
+    },
+    "@deepseek-ai/dsh-tools": {
+      "agent": {
+        "rootType": "Readonly<ToolExecution>|ToolExecution",
+        "sites": [
+          "src/observer.ts:137",
+          "src/observer.ts:138",
+          "src/observer.ts:142",
+          "src/observer.ts:152",
+          "src/observer.ts:155"
+        ]
+      },
+      "agent.id": {
+        "rootType": "Readonly<ToolExecution>|ToolExecution",
+        "sites": [
+          "src/observer.ts:142",
+          "src/observer.ts:152",
+          "src/observer.ts:155"
+        ]
+      },
+      "agent.session": {
+        "rootType": "ToolExecution",
+        "sites": [
+          "src/observer.ts:138"
+        ]
+      },
+      "callId": {
+        "rootType": "ToolExecution",
+        "sites": [
+          "src/observer.ts:140"
+        ]
+      },
+      "isError": {
+        "rootType": "Readonly<ToolExecutionResult>",
+        "sites": [
+          "src/observer.ts:156"
+        ]
+      },
+      "name": {
+        "rootType": "Readonly<ToolExecution>|ToolExecution",
+        "sites": [
+          "src/observer.ts:137",
+          "src/observer.ts:151"
+        ]
+      },
+      "parent": {
+        "rootType": "Readonly<ToolExecution>|ToolExecution",
+        "sites": [
+          "src/observer.ts:137",
+          "src/observer.ts:152"
+        ]
+      },
+      "value": {
+        "rootType": "Readonly<ToolExecutionResult>",
+        "sites": [
+          "src/observer.ts:157"
+        ]
+      },
+      "value.messageId": {
+        "rootType": "Readonly<ToolExecutionResult>",
+        "sites": [
+          "src/observer.ts:159",
+          "src/observer.ts:163"
+        ]
+      },
+      "value.messageId.length": {
+        "rootType": "Readonly<ToolExecutionResult>",
+        "sites": [
+          "src/observer.ts:159"
+        ]
+      }
+    },
+    "event:agent/inbox/claimed": {
+      "message.id": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:129"
+        ]
+      },
+      "message.source": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:129"
+        ]
+      },
+      "message.source.kind": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:129"
+        ]
+      }
+    },
+    "event:agent/inbox/discarded": {
+      "message.id": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:132"
+        ]
+      },
+      "message.source": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:132"
+        ]
+      },
+      "message.source.kind": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:132"
+        ]
+      }
+    },
+    "event:agent/inbox/inserted": {
+      "message.id": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:126"
+        ]
+      },
+      "message.source": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:126"
+        ]
+      },
+      "message.source.kind": {
+        "rootType": "unknown",
+        "sites": [
+          "src/index.ts:126"
+        ]
+      }
+    }
+  },
+  "discriminants": {
+    "@deepseek-ai/dsh-session": {
+      "data.inserted[].source.kind": [
+        "agent-message"
+      ],
+      "data.name": [
+        "send_message"
+      ],
+      "data.source.kind": [
+        "agent-message"
+      ],
+      "surfaceOp": [
+        "append"
+      ],
+      "type": [
+        "agent/inbox/spliced",
+        "step/end",
+        "step/start",
+        "tool/call",
+        "tool/result",
+        "turn/end",
+        "user/message"
+      ]
+    },
+    "@deepseek-ai/dsh-tools": {
+      "name": [
+        "send_message"
+      ]
+    },
+    "event:agent/inbox/claimed": {
+      "message.source.kind": [
+        "agent-message"
+      ]
+    },
+    "event:agent/inbox/discarded": {
+      "message.source.kind": [
+        "agent-message"
+      ]
+    },
+    "event:agent/inbox/inserted": {
+      "message.source.kind": [
+        "agent-message"
+      ]
+    }
   }
 }
