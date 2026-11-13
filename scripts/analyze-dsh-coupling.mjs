@@ -28,13 +28,23 @@
  * text protocol, message lifecycle ordering). Those are intent, not code
  * shape; they live in docs/upstream-audit.md and are maintained by hand.
  *
+ * What it *suspects*: layer 2 cannot be extracted, but most layer-2 bets leave
+ * a shape behind — a string-literal field read off an untyped record, a regex
+ * over log text, a WeakMap keyed by an upstream object, a service probed
+ * through a cast inside `try`. Those shapes are reported in `--check` against
+ * `tests/contracts/implicit-seams.ts`: every suspect must be acknowledged by a
+ * seam id or explicitly ignored as internal. This is a report, not a gate (yet):
+ * the shape is evidence of a bet, not a defect.
+ *
  * Modes:
  *   (default)  print a markdown draft report to stdout.
  *   --write    write the canonical inventory to `coupling.json` (commit it).
  *   --check    regenerate and deep-compare against `coupling.json`; any drift
  *              (new hook, new value import, new field path) exits 1 — a
  *              coupling change must be a conscious update, mirroring what
- *              baseline.json does for dependency content.
+ *              baseline.json does for dependency content. Also prints the
+ *              implicit-contract suspect report; unacknowledged suspects are
+ *              advisory only and never change the exit code.
  *
  * Reusable in any dsh plugin repo as-is: the package scope and the three
  * source roots are the only conventions.
@@ -44,7 +54,7 @@
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const SCOPE = '@deepseek-ai/'
@@ -385,6 +395,391 @@ function analyzeFile(path, root, state) {
   visit(source)
 }
 
+// --- implicit suspects (layer 2 forensics) --------------------------------------
+//
+// Layer 2 is intent, so nothing here proves a contract. What these shapes do
+// prove is that the code is *betting* on something the host does not type for
+// us: a field name inside a JSON record, a log line's wording, an object's
+// reference identity, a service that only exists after the host injects it.
+// Each hit is reported against `tests/contracts/implicit-seams.ts` so the bet
+// is either bound to a probe or explicitly declared internal.
+
+const REGISTRY_PATH = join(REPO_ROOT, 'tests/contracts/implicit-seams.ts')
+
+/** Types that carry no field guarantee: reading a member off them is a bet. */
+const UNTYPED_SHAPE = /^(?:unknown|any|object|\{\}|Record<\s*string\s*,\s*(?:unknown|any)\s*>)$/
+
+/** Calls that launder an untyped value (JSON text in, `Record<string, unknown>` out). */
+const UNTYPED_FACTORY = /^(?:JSON\.parse|asRecord|asParams)$/
+
+/** Collapse a node's source text to one readable line for the report. */
+function flatten(text, limit = 120) {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  return oneLine.length <= limit ? oneLine : `${oneLine.slice(0, limit - 1)}…`
+}
+
+function typeTextOf(typeNode, source) {
+  return typeNode === undefined ? '' : flatten(typeNode.getText(source), 200)
+}
+
+/** `string`, `number`, `unknown[]`, `readonly Foo[]` — a shape that names no field. */
+const PRIMITIVE_SHAPE = /^(?:string|number|boolean|bigint|symbol|(?:readonly\s+)?[\w$.]+(?:<[^>]*>)?\[\])$/
+
+function isPrimitiveShape(text) {
+  return PRIMITIVE_SHAPE.test(text.replace(/\s+/g, ' ').trim())
+}
+
+/** `unknown | undefined`, `Record<string, unknown>` — a shape with no field contract. */
+function isUntypedShape(text) {
+  if (text === '') return false
+  return UNTYPED_SHAPE.test(text.replace(/\s*\|\s*(?:undefined|null)/g, '').trim())
+}
+
+/** Strip only the wrappers that do not change the value's provenance. */
+function unwrapValue(node) {
+  let cursor = node
+  while (ts.isParenthesizedExpression(cursor) || ts.isNonNullExpression(cursor)) cursor = cursor.expression
+  return cursor
+}
+
+/** `a['b'].c` / `a?.b['c']` → `a.b.c`; falls back to the source text. */
+function accessPathOf(node, source) {
+  const segments = []
+  let cursor = unwrapValue(node)
+  for (;;) {
+    if (ts.isPropertyAccessExpression(cursor)) {
+      segments.unshift(cursor.name.text)
+      cursor = unwrapValue(cursor.expression)
+      continue
+    }
+    if (ts.isElementAccessExpression(cursor) && cursor.argumentExpression !== undefined
+      && ts.isStringLiteralLike(cursor.argumentExpression)) {
+      segments.unshift(cursor.argumentExpression.text)
+      cursor = unwrapValue(cursor.expression)
+      continue
+    }
+    break
+  }
+  const head = ts.isIdentifier(cursor) ? cursor.text : flatten(cursor.getText(source), 40)
+  return segments.length === 0 ? head : `${head}.${segments.join('.')}`
+}
+
+/**
+ * Suspects in one src file.
+ *
+ * The only inference here is provenance: which locals carry a value with no
+ * field contract (JSON.parse output, `asRecord(...)`, a `Record<string, unknown>`
+ * / `unknown` / `object` annotation, a caught error, or anything derived from
+ * one). Provenance is resolved lexically — bindings live in scopes, so the
+ * `usage: TokenUsage` parameter of one function is not smeared into the
+ * `usage` record of another — and closed under assignment to a fixed point,
+ * because one untyped local usually declares the next
+ * (`const usage = asRecord(data?.['usage'])`).
+ */
+function scanFileForSuspects(file, source) {
+  const suspects = []
+  const lineAt = node => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
+  const endLineAt = node => source.getLineAndCharacterOfPosition(Math.max(node.getStart(source), node.getEnd() - 1)).line + 1
+  const add = (kind, node, symbol) => suspects.push({
+    kind, file, line: lineAt(node), endLine: endLineAt(node), symbol,
+  })
+
+  // --- lexical scopes + untyped provenance -------------------------------------
+
+  const scopeAt = new Map() // node → innermost scope in effect at that node
+  const untypedEntry = new Map() // binding → does its value carry no field contract?
+  const variableEntries = [] // bindings whose untypedness depends on an initializer
+  const newScope = parent => ({ parent, bindings: new Map() })
+  const rootScope = newScope(null)
+
+  /** Bind one name (or every name of a destructuring pattern) in `scope`. */
+  const bind = (scope, name, binding) => {
+    if (ts.isIdentifier(name)) {
+      const entry = { ...binding, name: name.text }
+      scope.bindings.set(name.text, entry)
+      return [entry]
+    }
+    const entries = []
+    for (const element of name.elements) {
+      if (!ts.isBindingElement(element) || element.dotDotDotToken !== undefined) continue
+      entries.push(...bind(scope, element.name, binding))
+    }
+    return entries
+  }
+
+  const catchBindings = new Set() // `catch (e)` declarations, bound by the clause below
+  const structure = (node, scope) => {
+    let inner = scope
+    if (ts.isFunctionLike(node)) {
+      inner = newScope(scope)
+      for (const parameter of node.parameters) {
+        const annotation = typeTextOf(parameter.type, source)
+        for (const entry of bind(inner, parameter.name, { from: 'parameter' })) {
+          untypedEntry.set(entry, isUntypedShape(annotation))
+        }
+      }
+    } else if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
+      // `catch (error)` is `unknown`; naming its shape is exactly the bet we report.
+      inner = newScope(scope)
+      catchBindings.add(node.variableDeclaration)
+      for (const entry of bind(inner, node.variableDeclaration.name, { from: 'catch' })) {
+        untypedEntry.set(entry, true)
+      }
+    } else if (ts.isBlock(node) || ts.isModuleBlock(node)) {
+      inner = newScope(scope)
+    }
+    if (ts.isVariableDeclaration(node) && !catchBindings.has(node)) {
+      for (const entry of bind(inner, node.name, { from: 'variable' })) {
+        untypedEntry.set(entry, false)
+        variableEntries.push({ entry, initializer: node.initializer })
+      }
+    }
+    scopeAt.set(node, inner)
+    ts.forEachChild(node, child => structure(child, inner))
+  }
+  structure(source, rootScope)
+
+  const bindingOf = identifier => {
+    let scope = scopeAt.get(identifier) ?? rootScope
+    while (scope !== null) {
+      const entry = scope.bindings.get(identifier.text)
+      if (entry !== undefined) return entry
+      scope = scope.parent
+    }
+    return undefined
+  }
+
+  const untypedValue = node => {
+    const cursor = unwrapValue(node)
+    if (ts.isIdentifier(cursor)) {
+      const entry = bindingOf(cursor)
+      // A name this file cannot resolve (a global, an import, a callee whose
+      // return type we do not model) is left to the type checker.
+      return entry !== undefined && untypedEntry.get(entry) === true
+    }
+    if (ts.isPropertyAccessExpression(cursor) || ts.isElementAccessExpression(cursor)) {
+      return untypedValue(cursor.expression)
+    }
+    if (ts.isCallExpression(cursor)) {
+      const callee = unwrapValue(cursor.expression)
+      const name = callee.getText(source).replace(/\s+/g, '')
+      if (UNTYPED_FACTORY.test(name)) return true
+      return ts.isIdentifier(callee) && untypedValue(callee)
+    }
+    if (ts.isAsExpression(cursor) || ts.isSatisfiesExpression(cursor)) {
+      // `(x as string)` / `(x as unknown[])` assert a primitive or array shape,
+      // never a field name: the record read underneath is already reported.
+      return isPrimitiveShape(typeTextOf(cursor.type, source)) ? false : untypedValue(cursor.expression)
+    }
+    if (ts.isAwaitExpression(cursor)) return untypedValue(cursor.expression)
+    if (ts.isConditionalExpression(cursor)) {
+      return untypedValue(cursor.whenTrue) || untypedValue(cursor.whenFalse)
+    }
+    if (ts.isBinaryExpression(cursor)
+      && (cursor.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+        || cursor.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+      return untypedValue(cursor.left) || untypedValue(cursor.right)
+    }
+    return false
+  }
+
+  // Monotone closure: a binding only ever becomes untyped, so this terminates.
+  for (let round = 0; round < 24; round += 1) {
+    let changed = false
+    for (const { entry, initializer } of variableEntries) {
+      if (initializer === undefined || untypedEntry.get(entry) === true) continue
+      if (untypedValue(initializer)) {
+        untypedEntry.set(entry, true)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+
+  // Local names imported from the host: a WeakMap keyed by one of these bets on
+  // the identity of an object the plugin does not own.
+  const upstreamNames = new Set()
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    if (!statement.moduleSpecifier.text.startsWith(SCOPE)) continue
+    for (const name of importNamesOf(statement.importClause)) upstreamNames.add(name)
+  }
+
+  // --- reporting pass -----------------------------------------------------------
+
+  const visit = node => {
+    // Suspect 1a: a field read on a value with no field contract.
+    if (ts.isElementAccessExpression(node) && node.argumentExpression !== undefined
+      && ts.isStringLiteralLike(node.argumentExpression) && untypedValue(node.expression)) {
+      add('untyped-field', node, accessPathOf(node, source))
+    }
+    if (ts.isPropertyAccessExpression(node) && untypedValue(node.expression)
+      && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
+      add('untyped-field', node, accessPathOf(node, source))
+    }
+    // Suspect 1b: `x as { field: Type }` invents a shape for an untyped value.
+    if (ts.isAsExpression(node) && node.type !== undefined
+      && node.type.getText(source).trim().startsWith('{') && untypedValue(node.expression)) {
+      add('untyped-field', node, `as ${flatten(node.type.getText(source), 100)}`)
+    }
+
+    // Suspect 2: a regex is a bet on the exact wording of an upstream string.
+    if (ts.isRegularExpressionLiteral(node)) {
+      add('regex-protocol', node, flatten(node.getText(source)))
+    }
+
+    // Suspect 3: WeakMap identity — the host must hand back the same object.
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'WeakMap'
+      && node.typeArguments !== undefined && node.typeArguments.length > 0) {
+      const key = typeTextOf(node.typeArguments[0], source)
+      const keyName = node.typeArguments[0].getText(source).replace(/\s+/g, '')
+      if (isUntypedShape(key) || upstreamNames.has(keyName)) {
+        add('weakmap-identity', node, flatten(node.getText(source)))
+      }
+    }
+
+    // Suspect 4: a service reachable only through a cast, probed inside `try`.
+    if (ts.isTryStatement(node)) {
+      const scan = current => {
+        if (ts.isPropertyAccessExpression(current) && isCtxBase(current.expression)
+          && ts.isAsExpression(unwrapValue(current.expression))) {
+          add('try-cast-ctx', current, flatten(current.getText(source), 100))
+        }
+        ts.forEachChild(current, scan)
+      }
+      scan(node.tryBlock)
+    }
+
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return suspects
+}
+
+function implicitSuspects() {
+  const rootPath = join(REPO_ROOT, 'src')
+  if (!existsSync(rootPath)) return []
+  const suspects = []
+  for (const path of listSourceFiles(rootPath)) {
+    const text = readFileSync(path, 'utf8')
+    const source = ts.createSourceFile(path, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    suspects.push(...scanFileForSuspects(`src/${relative(rootPath, path)}`, source))
+  }
+  const seen = new Set()
+  return suspects
+    .filter(suspect => {
+      const key = `${suspect.kind}|${suspect.file}|${suspect.line}|${suspect.symbol}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind))
+}
+
+// --- the manual seam registry ----------------------------------------------------
+
+/**
+ * One acknowledgement, e.g. `src/mcp/analysis.ts:199`, `src/observer.ts:110-133`,
+ * `src/mcp/session-store.ts:24,30`, `src/mcp/analysis.ts:/STARTED_SUBAGENT/`, or
+ * a bare `src/foo.ts` for "everything in this file". An optional ` — reason`
+ * suffix is for humans and is stripped before matching.
+ */
+function acknowledgementMatcher(raw) {
+  const spec = raw.split(' — ')[0].trim()
+  const colon = spec.indexOf(':')
+  if (colon === -1) return { spec, scannable: spec.startsWith('src/'), match: suspect => suspect.file === spec }
+  const file = spec.slice(0, colon)
+  const rest = spec.slice(colon + 1).trim()
+  const asPattern = /^\/(.*)\/$/.exec(rest)
+  if (asPattern !== null) {
+    const pattern = new RegExp(asPattern[1], 'i')
+    return {
+      spec,
+      scannable: file.startsWith('src/'),
+      match: suspect => suspect.file === file && pattern.test(suspect.symbol),
+    }
+  }
+  const ranges = rest.split(',').map(part => {
+    const [from, to] = part.trim().split('-')
+    return [Number(from), Number(to ?? from)]
+  })
+  return {
+    spec,
+    scannable: file.startsWith('src/'),
+    match: suspect => suspect.file === file
+      && ranges.some(([from, to]) => suspect.line <= to && suspect.endLine >= from),
+  }
+}
+
+async function loadRegistry() {
+  if (!existsSync(REGISTRY_PATH)) {
+    return { seams: [], specifications: [], error: `missing ${relative(REPO_ROOT, REGISTRY_PATH)}` }
+  }
+  let module
+  try {
+    // Node ≥ 22.18 / 24 strips the types in place; the file has no runtime deps.
+    module = await import(pathToFileURL(REGISTRY_PATH).href)
+  } catch (error) {
+    return { seams: [], specifications: [], error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH)}: ${String(error)}` }
+  }
+  const seams = Array.isArray(module.IMPLICIT_SEAMS) ? module.IMPLICIT_SEAMS : []
+  const specifications = seams.flatMap(seam => [
+    ...(seam.acknowledged ?? []).map(raw => ({ seam: seam.id, effect: 'acknowledged', ...acknowledgementMatcher(raw) })),
+    ...(seam.ignored ?? []).map(raw => ({ seam: seam.id, effect: 'ignored', ...acknowledgementMatcher(raw) })),
+  ])
+  return { seams, specifications, error: null }
+}
+
+/**
+ * Compare the scanned suspects with the registry. The return value is the
+ * advisory text for `--check`; it never raises the exit code on its own.
+ */
+function suspectSection(suspects, registry) {
+  const lines = []
+  const unaccounted = suspects.filter(suspect =>
+    !registry.specifications.some(specification => specification.match(suspect)))
+
+  lines.push(`## 层 2 · 隐性契约嫌疑扫描（src ${suspects.length} 处嫌疑）`)
+  lines.push('')
+  lines.push('代码形状由 `scripts/analyze-dsh-coupling.mjs` 提取；每处嫌疑必须在 '
+    + '`tests/contracts/implicit-seams.ts` 里绑定到一条隐性契约，或标为 internal。'
+    + '本段只报备，不改变退出码。')
+  lines.push('')
+
+  if (registry.error !== null) {
+    lines.push(`⚠️  无法读取隐性契约清单：${registry.error}`)
+    lines.push('')
+    return lines.join('\n')
+  }
+
+  const acknowledged = registry.specifications.filter(specification => specification.effect === 'acknowledged')
+  const ignored = registry.specifications.filter(specification => specification.effect === 'ignored')
+  const covered = suspects.filter(suspect => acknowledged.some(specification => specification.match(suspect)))
+  const internal = suspects.filter(suspect => !acknowledged.some(specification => specification.match(suspect))
+    && ignored.some(specification => specification.match(suspect)))
+  // Seals that match no suspect shape are the ones the type system already
+  // covers (a typed `result.value.messageId` is a contract too, just not a
+  // shape this pass can see). Count them; do not cry wolf about them.
+  const typeCovered = acknowledged.filter(specification => specification.scannable
+    && !suspects.some(suspect => specification.match(suspect)))
+  lines.push(`${registry.seams.length} 条隐性契约；嫌疑已绑探针 ${covered.length} 处、标为 internal ${internal.length} 处、`
+    + `未报备 ${unaccounted.length} 处；另有 ${typeCovered.length} 条盖章已由类型覆盖（不产生嫌疑形状）。`)
+  lines.push('')
+
+  if (unaccounted.length === 0) {
+    lines.push('all implicit suspects acknowledged')
+  } else {
+    lines.push(`⚠️  发现 ${unaccounted.length} 处未报备的疑似隐性契约：`)
+    unaccounted.forEach((suspect, index) => {
+      lines.push(`  ${index + 1}. [${suspect.kind}] ${suspect.file}:${suspect.line} — ${suspect.symbol}`)
+      lines.push('     👉 请在 tests/contracts/implicit-seams.ts 中绑定到一条隐性契约探针，或标记为 internal。')
+    })
+  }
+
+  lines.push('')
+  return lines.join('\n')
+}
+
 // --- orchestration --------------------------------------------------------------
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -609,8 +1004,19 @@ if (MODE === 'write') {
       for (const line of sectionDiff(committed[section], data[section])) console.error(`  ${line}`)
     }
     console.error('若是有意的耦合变更：review 默认模式的草表后 --write 固化；否则这是意外耦合，先改代码。')
-    process.exit(1)
   }
+
+  // Advisory: the drift gate above is mechanical; implicit contracts are not.
+  // Print the reporting sheet even when the gate fails, so one run shows both.
+  const suspects = implicitSuspects()
+  const registry = await loadRegistry()
+  console.log('')
+  console.log(suspectSection(suspects, registry))
+
+  if (drifted.length > 0) process.exit(1)
 } else {
   console.log(report(data))
+  const suspects = implicitSuspects()
+  const registry = await loadRegistry()
+  console.log(suspectSection(suspects, registry))
 }
