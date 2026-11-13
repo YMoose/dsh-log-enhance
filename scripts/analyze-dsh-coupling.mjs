@@ -831,17 +831,28 @@ function canonical() {
     }
     packages[specifier] = { declaredIn: declaredInFor(specifier), roots }
   }
-  const hookSet = hooks => hooks
-    .map(({ event, via, params }) => ({ event, via, params }))
-    .sort((a, b) => a.event.localeCompare(b.event)
-      || a.via.localeCompare(b.via)
-      || JSON.stringify(a.params).localeCompare(JSON.stringify(b.params)))
-
   /** `file:line`, ordered by file then numerically by line. */
   const bySite = (a, b) => {
     const cut = value => value.replace(/:\d+$/, '')
     const line = value => Number(value.slice(value.lastIndexOf(':') + 1))
     return cut(a).localeCompare(cut(b)) || line(a) - line(b)
+  }
+
+  // Hooks keep their reading sites exactly like field paths do: the seam
+  // verifier reads them from coupling.json instead of re-grepping sources
+  // (quoting style or an extracted variable must never break verification).
+  const hookSet = hooks => {
+    const merged = new Map()
+    for (const { event, via, params, at } of hooks) {
+      const key = `${event} ${via} ${JSON.stringify(params)}`
+      if (!merged.has(key)) merged.set(key, { event, via, params, sites: new Set() })
+      merged.get(key).sites.add(at)
+    }
+    return [...merged.values()]
+      .map(hook => ({ event: hook.event, via: hook.via, params: hook.params, sites: [...hook.sites].sort(bySite) }))
+      .sort((a, b) => a.event.localeCompare(b.event)
+        || a.via.localeCompare(b.via)
+        || JSON.stringify(a.params).localeCompare(JSON.stringify(b.params)))
   }
 
   const fieldPaths = {}

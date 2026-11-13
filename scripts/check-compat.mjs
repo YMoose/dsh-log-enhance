@@ -94,6 +94,17 @@ function failUnparseableRange(range, probe, regex, expectation) {
 
 const manifest = JSON.parse(readFileSync(MANIFEST_URL, 'utf8'))
 const runtimeVersion = getDshRuntimeVersion()
+// A wholly missing `engines` object used to die on the label interpolation
+// below (`Cannot read properties of undefined`) instead of the friendly
+// missing-range diagnostic — same exit code, unreadable cause (review P9).
+if (typeof manifest.engines?.dsh !== 'string') {
+  failUnparseableRange(
+    manifest.engines?.dsh,
+    'lower bound',
+    LOWER_BOUND_RE,
+    'a leading `>=<version>` term, e.g. `>=0.2.2-rc.1 <0.3.0-0`',
+  )
+}
 const label = `${manifest.name}@${manifest.version} (engines.dsh ${manifest.engines.dsh})`
 
 // 1. Official ruling against the current verification-baseline runtime.

@@ -250,6 +250,9 @@
       "via": "on",
       "params": [
         "{ agent, message, turn }"
+      ],
+      "sites": [
+        "src/index.ts:128"
       ]
     },
     {
@@ -257,6 +260,9 @@
       "via": "on",
       "params": [
         "{ agent, message }"
+      ],
+      "sites": [
+        "src/index.ts:131"
       ]
     },
     {
@@ -264,6 +270,9 @@
       "via": "on",
       "params": [
         "{ agent, message }"
+      ],
+      "sites": [
+        "src/index.ts:125"
       ]
     },
     {
@@ -272,6 +281,9 @@
       "params": [
         "session",
         "event"
+      ],
+      "sites": [
+        "src/index.ts:119"
       ]
     },
     {
@@ -280,6 +292,9 @@
       "params": [
         "exec",
         "next"
+      ],
+      "sites": [
+        "src/index.ts:120"
       ]
     },
     {
@@ -288,6 +303,9 @@
       "params": [
         "exec",
         "result"
+      ],
+      "sites": [
+        "src/index.ts:124"
       ]
     }
   ],
@@ -298,6 +316,9 @@
       "params": [
         "payload",
         "next"
+      ],
+      "sites": [
+        "tests/integration/harness.test.ts:72"
       ]
     },
     {
@@ -306,6 +327,9 @@
       "params": [
         "session",
         "event"
+      ],
+      "sites": [
+        "tests/integration/harness.test.ts:77"
       ]
     },
     {
@@ -315,6 +339,9 @@
         "exec",
         "_result",
         "next"
+      ],
+      "sites": [
+        "tests/integration/harness.test.ts:68"
       ]
     }
   ],

@@ -87,6 +87,28 @@ test('a missing engines.dsh is reported as missing rather than a bare undefined'
   }
 })
 
+test('a wholly missing engines object takes the friendly path, not a TypeError', () => {
+  // Review P9: `engines` gone entirely used to crash the label interpolation
+  // (`Cannot read properties of undefined`) before the missing-range
+  // diagnostic could fire. Exit status was still 1 — this pins the MESSAGE.
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-compat-'))
+  try {
+    const manifestPath = join(dir, 'package.json')
+    const manifest = structuredClone(baseManifest) as { engines?: Record<string, string> }
+    delete manifest.engines
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    const result = spawnSync(process.execPath, [SCRIPT], {
+      encoding: 'utf8',
+      env: { ...process.env, DSH_LOG_ENHANCE_MANIFEST: manifestPath },
+    })
+    assert.equal(result.status, 1, result.stdout)
+    assert.match(result.stderr, /engines\.dsh is missing from package\.json/)
+    assert.doesNotMatch(result.stderr, /TypeError/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a parseable range that admits its own past-upper prerelease still fails', () => {
   // Both probes derive here, yet the `||` alternative re-admits
   // `0.3.0-alpha.1`. This proves the boundary assertions still actually run

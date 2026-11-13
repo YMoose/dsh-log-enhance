@@ -54,6 +54,7 @@ interface HookRecord {
   readonly event: string
   readonly via: string
   readonly params: readonly string[]
+  readonly sites: readonly string[]
 }
 
 interface PathRecord {
@@ -399,14 +400,16 @@ function generate(): Generated {
   const siteOf = (pkg: string, path: string): string => COUPLING.fieldPaths[pkg]?.[path]?.sites[0] ?? 'unknown'
 
   const hookSite = (event: string, kind: 'src' | 'test'): string => {
-    const candidates = kind === 'src'
-      ? ['src/index.ts']
-      : ['tests/integration/harness.test.ts', 'tests/integration/mcp-mount.test.ts']
-    for (const file of candidates) {
-      const index = readText(file).split('\n').findIndex(line => line.includes(`ctx.on('${event}'`))
-      if (index >= 0) return `${file}:${index + 1}`
+    // Read the site from coupling.json (the scanner's AST truth) instead of
+    // re-grepping sources: quoting style, an extracted variable, or a moved
+    // file must never break verification — a stale inventory should fail,
+    // loudly, as a coupling drift instead.
+    const site = (kind === 'src' ? COUPLING.srcHooks : COUPLING.testHooks)
+      .find(hook => hook.event === event)?.sites[0]
+    if (site === undefined) {
+      throw new Error(`coupling.json has no ${kind} hook site for '${event}'; regenerate it with analyze-dsh-coupling.mjs --write`)
     }
-    throw new Error(`no ctx.on('${event}') registration found in ${candidates.join(', ')}`)
+    return site
   }
 
   const checkRoot = (key: string, spec: ProbeSpec, record: PathRecord): void => {
