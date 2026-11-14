@@ -150,8 +150,9 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
 
 ### 其他插件仓库如何接入这套机制
 
-以模式传播，不立项：配方把接入成本压到"复制文件 + 一次手动验证"。前三步是前提，
-没有它们，抄走的 CI 只会永远绿——绿灯变成空话：
+以受管同步传播（工具链的家：独立仓 dsh-seam，见第 4 步），接入成本压到
+"clone + 一条 sync + 一次手动验证"。前三步是前提，没有它们，同步来的 CI
+只会永远绿——绿灯变成空话：
 
 1. **地基**：提交 lockfile，CI 用 `npm ci`；全部 `@deepseek-ai/*` devDeps 精确版本。
    （pnpm 仓库需把 baseline 读写适配到 pnpm 的 lockfile 结构，其余不变。）
@@ -159,19 +160,24 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    peers 只留真实共享实例的运行时依赖（通常 cordis + schemastery）。
 3. **传感器**：至少一条真的碰宿主 API 的集成测试（hook 或读盘格式）。这是唯一
    不能抄的部分——测试存在，门禁与 canary 才有意义。
-4. **复制五个文件 + `tests/seam/` + 两个 workflow**：`scripts/bump-upstream.mjs`（跟上游，dist-tag
-   陷阱编码在头部注释）、`scripts/write-baseline.mjs` + `tests/baseline.test.ts`
-   （钉安装内容，防同版本重发布）、`scripts/check-compat.mjs`（官方兼容门自检）、
-   `scripts/analyze-dsh-coupling.mjs`（默认模式出自家耦合草表，`--write` 固化）、
-   `tests/seam/`（接触面验货引擎 + 标准规格库，见
-   [seam-driven-verification.md](seam-driven-verification.md)；接入仓自写
-   `tests/contracts/{implicit-seams,seam-runs}.ts` 与一个调 `runSeamSuite` 的薄入口。
-   探针收窄已不靠手写的上游字典——扫描器从插件自己的源码提取守卫上下文，
-   验货器对上游结构不可知；`scripts/verify-coupling.mjs` 可对任意 coupling.json
-   独立跑契约编译——上游 CI 也能拿它验接入仓的清单），
-   `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
-   第三方 action 一律 SHA pin（本仓现已不依赖任何第三方 action）；workflow 里
-   不出现版本号——版本状态只在 package.json 与 baseline.json。
+4. **受管同步（dsh-seam）**：工具链的家是独立仓
+   [YMoose/dsh-seam](https://github.com/YMoose/dsh-seam)（2026-11-14 定策：提前
+   抽取——"外部使用者从别人的插件仓借文件"身份上不成立，原定"首个外部消费者
+   再独立"的触发条件作废）。接入 = `git clone` + `node cli.mjs sync --into .`。
+   受管面：五个脚本（`bump-upstream.mjs` 跟上游、`write-baseline.mjs` 钉安装内容
+   防同版本重发布、`check-compat.mjs` 官方兼容门自检、`analyze-dsh-coupling.mjs`
+   出耦合草表、`verify-coupling.mjs` 对任意 coupling.json 独立跑契约编译——
+   上游 CI 也能拿它验接入仓的清单）+ `tests/seam/` 验货引擎与标准规格库（见
+   [seam-driven-verification.md](seam-driven-verification.md)；探针收窄不靠手写
+   字典——守卫从插件自己的源码提取，验货器对上游结构不可知）+ 三个机制测试。
+   `node cli.mjs check` 按 `.dsh-seam.json`（源 commit + 逐文件 sha256）校验
+   受管文件；本地改过的受管文件 sync 会拒绝覆盖——**引擎改动一律在 dsh-seam
+   侧发起、sync 回消费仓**，消费仓不留分叉。
+   各家自备（不在受管面）：`tests/contracts/{implicit-seams,seam-runs}.ts`、调
+   `runSeamSuite` 的薄入口、现实版 `tests/baseline.test.ts`（机制半边随载荷走，
+   现实半边各家自留）、`.github/workflows/{ci,canary}.yml`（S1 门禁与 S2 绊线
+   手工对齐；第三方 action 一律 SHA pin——本仓不依赖任何第三方 action；workflow
+   里不出现版本号——版本状态只在 package.json 与 baseline.json）。
    接入后手动 `workflow_dispatch` 跑一次 canary，链路通了才算闭环。
 
 随配方一起迁移的两条纪律：**两处同步**（engines.dsh 下界 = baseline 指纹；
