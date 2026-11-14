@@ -215,3 +215,54 @@ test('check mode fails loudly when the republish anchor is unreadable', () => {
     rmSync(registry.dir, { recursive: true, force: true })
   }
 })
+
+test('--keep-floor moves the train and leaves engines.dsh untouched (print-only honors it too)', () => {
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.4' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED, '0.2.2-rc.4': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.2.2-rc.4': {} },
+    },
+  })
+  try {
+    // Plan first: --print-only honors the flag — no engines move in the plan.
+    const plan = runScript(['--print-only', '--keep-floor'], at, registry.base)
+    assert.equal(plan.status, 0, `${plan.stdout}\n${plan.stderr}`)
+    assert.doesNotMatch(plan.stdout, /engines\.dsh:.*->/)
+    assert.match(plan.stdout, /engines\.dsh: >=0\.2\.2-rc\.3 <0\.3\.0-0 \(kept/)
+    // Write mode: the train moves, the floor and the wall stay exactly put.
+    const { status, stdout, stderr } = runScript(['--keep-floor'], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    const manifest = readManifest(at)
+    assert.equal(manifest.devDependencies['@deepseek-ai/dsh-agent'], '0.2.2-rc.4')
+    assert.equal(manifest.devDependencies['@deepseek-ai/dsh-llm'], '0.2.2-rc.4')
+    assert.equal(manifest.engines.dsh, '>=0.2.2-rc.3 <0.3.0-0', 'the floor must stay at rc.3')
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('--keep-floor refuses a target the existing wall does not admit, writing nothing', () => {
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.3.0-rc.1' },
+      time: { '0.3.0-rc.1': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.3.0-rc.1': {} },
+    },
+  })
+  try {
+    const before = readFileSync(at.manifestPath, 'utf8')
+    const { status, stdout, stderr } = runScript(['--keep-floor'], at, registry.base)
+    assert.equal(status, 1, `expected a refusal, got: ${stdout}\n${stderr}`)
+    assert.match(stderr, /does not admit the target 0\.3\.0-rc\.1/)
+    assert.match(stderr, /conscious decision/)
+    // Crossing the wall writes NOTHING — the manifest is byte-identical.
+    assert.equal(readFileSync(at.manifestPath, 'utf8'), before)
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})

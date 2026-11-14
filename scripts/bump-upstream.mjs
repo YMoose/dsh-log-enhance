@@ -25,6 +25,19 @@
  *                 or baseline fetch failure exits 1 — loud, never a
  *                 silent "no").
  *   --print-only  resolve and print the plan; package.json untouched.
+ *   --keep-floor  (write/--print-only only) move the train but KEEP
+ *                 engines.dsh exactly as declared — the future
+ *                 range/matrix escape hatch (docs/versioning.md §4).
+ *                 BEFORE anything is written, the existing range must
+ *                 still admit the target: floor <= target < upper with
+ *                 the same prerelease/`-0` wall semantics
+ *                 scripts/check-compat.mjs probes through the official
+ *                 gate (this file uses its own compareVersions — a
+ *                 second @deepseek-ai/dsh-app-boot import site would
+ *                 drift the coupling inventory's file list). A target
+ *                 the range rejects — e.g. past the upper wall — is a
+ *                 REFUSAL: moving the wall is a conscious decision, not
+ *                 a side effect of a train bump.
  *   (default)     rewrite package.json in place (2-space indent): every
  *                 exact-version dsh-* entry moves to the target AND
  *                 engines.dsh moves with it — floor = the target, upper
@@ -66,13 +79,18 @@ const FIELDS = ['dependencies', 'devDependencies', 'peerDependencies']
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 
 const args = process.argv.slice(2)
-const known = new Set(['--check', '--print-only'])
+const known = new Set(['--check', '--print-only', '--keep-floor'])
 const unknown = args.filter(argument => !known.has(argument))
 if (unknown.length > 0) {
-  console.error(`unknown argument(s): ${unknown.join(' ')}; usage: bump-upstream.mjs [--check | --print-only]`)
+  console.error(`unknown argument(s): ${unknown.join(' ')}; usage: bump-upstream.mjs [--check | --print-only] [--keep-floor]`)
   process.exit(1)
 }
 const MODE = args.includes('--check') ? 'check' : args.includes('--print-only') ? 'print' : 'write'
+const KEEP_FLOOR = args.includes('--keep-floor')
+if (KEEP_FLOOR && MODE === 'check') {
+  console.error('--keep-floor applies to the plan/rewrite modes, not --check')
+  process.exit(1)
+}
 
 // --- 1. Discover the installed train from package.json ---------------------
 
@@ -200,7 +218,35 @@ if (core === null) {
   process.exit(1)
 }
 const enginesRange = `>=${floor} <${core[1]}.${Number(core[2]) + 1}.0-0`
-if (moves.length > 0 && manifest.engines?.dsh !== enginesRange) {
+if (KEEP_FLOOR) {
+  // The floor stays put, so the EXISTING range must still admit the target.
+  // The official gate decides (same ruling as scripts/check-compat.mjs's
+  // boundary probes — prerelease ordering and the `-0` wall included); this
+  // script never reimplements semver.
+  const range = manifest.engines?.dsh
+  if (typeof range !== 'string') {
+    console.error('--keep-floor needs an existing engines.dsh range to keep')
+    process.exit(1)
+  }
+  if (moves.length > 0) {
+    // The floor stays put, so the EXISTING range must still admit the target.
+    // floor <= target < upper with full prerelease semantics — the same
+    // bounds scripts/check-compat.mjs probes through the official gate;
+    // implemented with this file's compareVersions (see header note).
+    const lower = /^\s*>=\s*(\S+)/.exec(range)?.[1]
+    const upper = /<\s*(\S+)\s*$/.exec(range)?.[1]
+    if (lower === undefined || upper === undefined) {
+      console.error(`REFUSED: cannot derive both bounds from engines.dsh ${JSON.stringify(range)} — rerun without --keep-floor to move floor and wall together`)
+      process.exit(1)
+    }
+    if (compareVersions(lower, target) > 0 || compareVersions(target, upper) >= 0) {
+      console.error(`REFUSED: engines.dsh ${range} does not admit the target ${target} (floor ${lower}, wall ${upper})`)
+      console.error('Moving the wall (engines.dsh) is a conscious decision — rerun without --keep-floor to move floor and wall together.')
+      process.exit(1) // loud, and NOTHING has been written
+    }
+  }
+  console.log(`  engines.dsh: ${range} (kept; train ${target} admitted)`)
+} else if (moves.length > 0 && manifest.engines?.dsh !== enginesRange) {
   console.log(`  engines.dsh: ${String(manifest.engines?.dsh ?? '(unset)')} -> ${enginesRange}`)
 }
 if (otherDeepseek.length > 0) {
@@ -213,13 +259,19 @@ if (moves.length === 0) {
 }
 if (MODE === 'write') {
   for (const move of moves) manifest[move.field][move.name] = target
-  // Single-line follow (docs/versioning.md §4): engines.dsh moves WITH the
-  // train — floor = the new train, upper bound = next minor with the `-0`
-  // prerelease wall. This is what makes the canary's artifact complete.
-  manifest.engines ??= {}
-  manifest.engines.dsh = enginesRange
+  if (KEEP_FLOOR) {
+    // Range follow (docs/versioning.md §4 escape hatch): the train moves
+    // inside the declared interval; engines.dsh keeps guarding the wall.
+    console.log(`package.json rewritten (train -> ${target}; engines.dsh kept); next: npm install && node scripts/write-baseline.mjs && npm run check`)
+  } else {
+    // Single-line follow (docs/versioning.md §4): engines.dsh moves WITH the
+    // train — floor = the new train, upper bound = next minor with the `-0`
+    // prerelease wall. This is what makes the canary's artifact complete.
+    manifest.engines ??= {}
+    manifest.engines.dsh = enginesRange
+    console.log(`package.json rewritten (train + engines.dsh -> ${enginesRange}); next: rm package-lock.json && npm install && node scripts/write-baseline.mjs && npm run check`)
+  }
   writeFileSync(manifestUrl, `${JSON.stringify(manifest, null, 2)}\n`)
-  console.log(`package.json rewritten (train + engines.dsh -> ${enginesRange}); next: rm package-lock.json && npm install && node scripts/write-baseline.mjs && npm run check`)
 }
 
 // --- minimal semver ordering (fallback path only) ---------------------------

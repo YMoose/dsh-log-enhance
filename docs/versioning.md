@@ -93,6 +93,8 @@ CI 配置本身不是证据）：
 >
 > **定策背景**：DSH 尚处 Demo 阶段——快速迭代、无稳定版线、对外不作兼容承诺（0.x rc 乱序、同版本重发均有先例）；本插件同处 Demo 阶段，选择随其共同演进，只对齐最新发版，不透支承诺。
 > **复审触发**：上游宣布稳定版 / semver 承诺（如发 1.0）时，重估是否放宽 engines 声明、降低绊线频率乃至恢复多线验证。
+>
+> **逃生口（2026-11-14）**：`bump-upstream.mjs --keep-floor` 已备——列车推进而 engines.dsh 不动（写入前先经官方 gate 验证目标落在现有区间内，越墙即拒绝写入）；配套 seam 引擎的 `versionLockstep: 'range'` 模式。当前策略仍是单线跟随，二者只是为未来矩阵/区间化预留的门，见 [seam-driven-verification.md](seam-driven-verification.md)。
 
 信号源优先级（S2 触发用）：
 
@@ -165,7 +167,8 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    [seam-driven-verification.md](seam-driven-verification.md)；接入仓自写
    `tests/contracts/{implicit-seams,seam-runs}.ts` 与一个调 `runSeamSuite` 的薄入口。
    探针收窄已不靠手写的上游字典——扫描器从插件自己的源码提取守卫上下文，
-   验货器对上游结构不可知），
+   验货器对上游结构不可知；`scripts/verify-coupling.mjs` 可对任意 coupling.json
+   独立跑契约编译——上游 CI 也能拿它验接入仓的清单），
    `.github/workflows/ci.yml`（S1 门禁）与 `canary.yml`（S2 绊线 + 兜底）。
    第三方 action 一律 SHA pin（本仓现已不依赖任何第三方 action）；workflow 里
    不出现版本号——版本状态只在 package.json 与 baseline.json。
