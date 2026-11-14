@@ -1,0 +1,18 @@
+{
+  "source": {
+    "path": "/home/ye/yzh/engineering/dsh-seam",
+    "commit": "964eb43a6ca16ea07b452516fc2cac2358d17e9a"
+  },
+  "files": {
+    "scripts/analyze-dsh-coupling.mjs": "ec55d563bbfdecfbc9ba395d76737d9466f7dc0214ee10a11fe719aaa874a93c",
+    "scripts/bump-upstream.mjs": "bf8650e754bef449ebd4637a59bb6ea738adbf41e35dbdc78fc1882acc246cf2",
+    "scripts/check-compat.mjs": "3859baf8f8577babc3574f1afc7692436630528c225283c871f91cfdb6af71b4",
+    "scripts/verify-coupling.mjs": "720e4da0acb01681b57d9189fe8f7c31f5465442e445a96d44ab82d030bd7df5",
+    "scripts/write-baseline.mjs": "9a479c1c5d0e2aab75a7a79c4504d8af9c5e6442364250e4dbe2eba10fdcca7b",
+    "tests/baseline-fingerprint.test.ts": "193c429027336b13a19c08cbe9dd0d47efaf68f66cd894b7128f39bc5aa79d09",
+    "tests/bump-upstream.test.ts": "47b14550da366227669f9e9f725d613d906ee3e4b47d49e98317a9d6de70cc23",
+    "tests/coupling-gate.test.ts": "6e21f39bf5becfd39a867aaa09d3824543d01e6cf8414ff0742151c1cf495fcb",
+    "tests/seam/engine.ts": "75292d8bcf54d673a6a32580c73278a6f512c49775aca27e85848e62dfadb60d",
+    "tests/seam/standard-specs.ts": "df1f055b22a17435863c2ec3ace6fb0f8f35fc1c27fa2907e69d5752f5379291"
+  }
+}
