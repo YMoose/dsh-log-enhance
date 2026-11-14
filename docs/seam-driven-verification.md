@@ -210,7 +210,11 @@
 #### 3. 上游发到了我们没装进 `devDependencies` 的包里
 - **例子**：`@deepseek-ai/dsh-mcp-manager`（见 `upstream-audit.md §8`：不是本包依赖，`node_modules` 中无其发布产物）。
 - **为什么包不住**：既然 `node_modules` 里根本没装这个包，我们的探路小插件在本地/CI 里就拿不到它的真代码，只能用我们自己模拟的假 `mcpManager` 去测。要是上游真把 `dsh-mcp-manager` 的 `register()` 参数校验改了，我们本地是测不出来的。
-- **怎么补**：只有等到 S1 的"装进真实 `dsh` CLI 跑 `--dump-config`"或者连上本地完整 Harness 仓库时才能发现。
+- **怎么补**：原指望的 S1"装进真实 `dsh` CLI 跑 `--dump-config`"步骤已随
+  dsh-plugin-checker 弃用一并移除（2026-11-13，ci.yml 不再做真机安装冒烟）；
+  当前覆盖止于集成测试经真实 cordis-plugin-loader 的挂载路径（loader 面），
+  `dsh-mcp-manager` 自身的 `register()` 语义仍是登记在案的缺口——只能等将来
+  恢复真机 CLI 冒烟、或上游提供可测的挂载 API 时补上。
 
 ---
 

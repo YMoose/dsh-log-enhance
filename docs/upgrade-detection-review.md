@@ -1,210 +1,235 @@
-# 上游升级检测机制评审：问题清单
+# 上游升级检测机制复审：问题清单
 
-评审日期：2026-11-13。本文记录对"上游代码升级检测"相关机制的一次评审发现的
-问题，**仅列问题与证据，不含修复方案**。评审方式为静态代码阅读加 git 历史核对，
-未实际触发 CI 运行；文中间接推断处已单独标注。
+复审日期：2026-11-13（第二轮）与 2026-11-14（第三轮）。本文记录两轮复审
+新发现的问题，**仅列现象、证据与后果，不含修复方案**。第一轮 P1–P10 的
+处理经过记录在 git 历史（`57b88b8`）与各文档中，不再重复；N 条目的证据
+行号以第二轮当时的版本为准，第三轮的行号更新见 R 条目。
 
-> **处理记录（2026-11-13，同日全部落实）**：评审结论全部属实。P1/P2/P5/P10 →
-> `7368969`（列车移动原子化：bump 同步推进 engines.dsh、上界随次 minor 重算；
-> 绊线看守全列车 14 个成员的 `time`；exact-version 认 build metadata；ci.yml
-> 弃用第三方 dsh-plugin-checker，workflow 不再携带版本号）；P3/P7 → `5cba6e1`
-> （canary 补齐 coupling 门禁 + pack 冒烟，与 S1 同覆盖面；周兜底判定改读
-> schedule 列表，不再复制 cron 字面量）；P4 → `9bd3270`（未报备嫌疑与清单不可读
-> 在 `--check` 下直接判红，红证：旧脚本对同一夹具 exit 0）；P6/P8/P9 → `fee7079`
-> （baseline 排除嵌套 lockfile 键；engines 对象缺失走友好诊断；hook 行号改由
-> coupling.json 提供，seam-verify 弃文本 grep）。每项修复均先以夹具复现红再转绿。
+> **处理记录（2026-11-14）**：11 项判定 8 修 2 缓 1 收尾，全部落实。
+> N1/R1/R2/R3（build-metadata 口径：lockstep 三处以 semver 优先级归一化比较
+> ——devDeps 保留完整 target、engines 剥 build；两份 comparator 补 build 组
+> 解析、不参与优先级；越墙检查注释改真）与 R4（verify-coupling 豁免臂以
+> 同问题集内 TS2339-on-JsonValue 证据限定 TS18047、豁免面逐条具名）、
+> R5（扫描器字面 NUL 字节改 `\x00` 转义，file/grep 恢复文本可见）随红证
+> 修复；N2/N3 文档如实化（S1 悬空引用改述现状；"覆盖更深的挂载面"限定为
+> loader 路径，bundle-patch 的 profile 应用路径显式登记为无覆盖缺口）；
+> R6 收尾（RESERACH.md 更名 RESEARCH.md，本文件随修复提交）。N4（行号
+> 锚定摩擦系 conscious-update 纪律的固有代价）与 N5（分钟级重锚窗口，
+> 周一兜底自愈；将来可用 registry `dist.integrity` 做内容锚加固）缓办。
 
-## 评审范围
+## 验证记录
 
-- 脚本：`scripts/bump-upstream.mjs`、`scripts/write-baseline.mjs`、
-  `scripts/check-compat.mjs`、`scripts/analyze-dsh-coupling.mjs`、
-  `scripts/link-harness.mjs`
-- 工作流：`.github/workflows/ci.yml`、`.github/workflows/canary.yml`
-- 测试：`tests/baseline.test.ts`、`tests/seam-verify.test.ts`、
-  `tests/check-compat.test.ts`、`tests/link-harness-contracts.test.ts`、
-  `tests/contracts/implicit-seams.ts`
-- 数据文件：`coupling.json`、`baseline.json`、`cordis.patch.yml`、`package.json`
-- 文档：`docs/versioning.md`、`docs/seam-driven-verification.md`、
-  `docs/upstream-audit.md`
-- git 历史：`98172b6`（canary 落地）、`217929e`（seam-verify 落地）、
-  `067147f`（rc.3 收编）及相关时间线
+两轮均除静态阅读外实际运行了验证（node 25.6.1）：
+
+- **第二轮（2026-11-13）**：`analyze-dsh-coupling.mjs --check`（绿，82 处
+  嫌疑全部报备）、`check:compat`（绿）、`npm test`（174 pass / 1 skip）、
+  `npm run test:integration`（12/12）、`bump-upstream.mjs --check`（真实
+  registry，`UPSTREAM_CHANGED=no`，14 成员看守生效）。
+- **第三轮（2026-11-14，seam 引擎化重构后）**：`analyze-dsh-coupling.mjs
+  --check`（绿）、`check:compat`（绿）、`npm test`（220 测试，219 pass /
+  1 skip，上轮 175 → 220）、`npm run test:integration`（12/12）、
+  `verify-coupling.mjs coupling.json`（exit 0，100/105 探针编译干净、
+  5 处豁免）；另以临时目录夹具直调 `probeVersionLockstep` 完成两组实证
+  （见 R1、R2）。
+
+## 复审范围
+
+- **第二轮**：`7368969`、`5cba6e1`、`9bd3270`、`fee7079`、`57b88b8` 五个
+  提交——`scripts/bump-upstream.mjs`、`.github/workflows/{ci,canary}.yml`、
+  `scripts/analyze-dsh-coupling.mjs`、`scripts/write-baseline.mjs`、
+  `tests/seam-verify.test.ts` 及配套测试、`tests/contracts/implicit-seams.ts`、
+  `coupling.json`、`cordis.patch.yml`、相关文档。
+- **第三轮**：`a3ea7f9`（引擎/标准库/契约三层拆分）、`aa2d5a7`（探针守卫
+  从插件源码提取）、`fa4794d`（契约-only 路径、机械推导 import、suite 注入
+  审计映射）、`89a9a2a`（`--keep-floor` 与 range lockstep）——
+  `tests/seam/engine.ts`、`tests/seam/standard-specs.ts`、
+  `tests/contracts/seam-runs.ts`、薄入口 `tests/seam-verify.test.ts`、
+  `scripts/analyze-dsh-coupling.mjs`（+209 行守卫提取）、
+  `scripts/bump-upstream.mjs`（+70 行）、`scripts/verify-coupling.mjs`（新）、
+  `tests/{engine-contract,guard-extraction}.test.ts`、
+  `tests/bump-upstream.test.ts`（+51 行）、`coupling.json`（`sites` →
+  `accesses`+`guards` 新形状）、两份文档增补。
 
 ## 问题总览
 
-| 编号 | 级别 | 一句话 |
-|---|---|---|
-| P1 | 设计矛盾 | canary 在列车前移时必然红：lockstep 探针与 canary 只改一处依赖的流程互相矛盾 |
-| P2 | 盲区 + 文档失实 | 同版本重发布检测只锚定 bellwether 一个包，与历史事故形态不符，文档过度承诺 |
-| P3 | 覆盖面 + 文档失实 | canary 绿不含真实宿主安装冒烟，bundle patch 注册路径无任何 canary 覆盖 |
-| P4 | 计划烂尾 | 隐性嫌疑扫描停留在 advisory，与既定执行计划"阶段 B 后改硬门禁"不一致 |
-| P5 | 流程缺口 | 跨 minor 收编流程未定义，"artifact 即全部材料"只对同 minor 成立 |
-| P6 | 实现细节 | baseline 指纹对嵌套依赖路径的键名处理错误，属未触发的隐含假设 |
-| P7 | 实现细节 | canary 周兜底判定依赖与 cron 定义重复的字符串 |
-| P8 | 实现细节 | seam-verify 的 hook 定位用文本 grep，与整体 AST 风格不一致 |
-| P9 | 实现细节 | check-compat 在 engines 对象整体缺失时报错不友好 |
-| P10 | 实现细节 | 精确版本正则不认 build metadata |
+| 编号 | 轮次 | 级别 | 一句话 | 第三轮判定 |
+|---|---|---|---|---|
+| N1 | 二 | 中等 | dist-tag 指向 build-metadata 版本时，原子移动自造 lockstep 违规 | 未解决，实证补全 → R1 |
+| N2 | 二 | 轻微 | seam 文档兜底指引指向已删除的 S1 步骤（悬空引用） | 未处理（`:213` 仍在） |
+| N3 | 二 | 轻微 | bundle patch 应用路径零覆盖，文档"覆盖更深的挂载面"表述偏满 | 未处理（`versioning.md:88/:199` 仍在） |
+| N4 | 二 | 属性 | 嫌疑硬门禁的行号锚定摩擦：重锚是手工活，与 coupling.json 机械重生成不对称 | 未变（`implicit-seams.ts` 本轮未动） |
+| N5 | 二 | 轻微（既有残余） | canary 内"安装→重锚 baseline"窗口的重发布竞态 | 未变（两 workflow 本轮未动） |
+| R1 | 三 | 中等 | build-metadata 版本目标在本仓策略（single-line）下仍自造 lockstep 红 | — |
+| R2 | 三 | 中等 | 两份 `compareVersions` 均不解析 build metadata，localeCompare 兜底方向可错，"低于下界被静默放行"已实证 | — |
+| R3 | 三 | 轻微 | `--keep-floor` 外层注释陈述了实现中不存在的保证（"official gate decides"） | — |
+| R4 | 三 | 轻微 | verify-coupling 的 TS18047 豁免臂不限定 JsonValue，豁免面只打印计数 | — |
+| R5 | 三 | 轻微（既有） | 扫描器源文件含字面 NUL 字节，grep/file 判为 binary | — |
+| R6 | 三 | 备忘 | 工作区文档收尾未落（RESERACH.md 文件名拼写、本文件未提交） | — |
 
 ---
 
-## P1（设计矛盾）：canary 在列车前移时永远不可能绿
+# 第二轮发现（2026-11-13）
 
-**现象**：S2 canary 的设计目标是"列车前移 → 全量验证 → 绿 → artifact 即重验
-commit 材料"（`docs/versioning.md` §4 S2 行、`canary.yml` 头注释"On green, the
-uploaded artifact is exactly the revalidation commit"）。但按当前实现，只要列车
-前移，canary 的 `npm run check` 必然失败，与上游是否真的破坏兼容无关。
+## N1（中等）：build-metadata 版本目标使 lockstep 三处失配，canary 必红
 
-**证据链**：
-
-1. canary 的列车前移路径是
-   `bump-upstream.mjs`（write 模式）→ 重装 → 重生成 baseline → `npm run check`。
-2. `scripts/bump-upstream.mjs:142-144` 的 write 模式只重写依赖声明里的 dsh-* 条目；
-   `engines.dsh` 与 `.github/workflows/ci.yml` 的 `dshVersion` 不在其改写范围内
-   （前者不是依赖声明，后者在另一个文件）。
-3. `npm run check` → `npm test` → `node --test dist-test/tests/*.test.js` 包含
-   `seam-verify.test.js`；其中 `probeVersionLockstep`
-   （`tests/seam-verify.test.ts:738-765`）断言四处完全一致：
-   devDependencies 的 dsh-* train（753 行）=== `engines.dsh` 下界（754 行）===
-   `ci.yml` 的 `dshVersion`（756-757 行）=== `baseline.json` 指纹列车（759-764 行）。
-4. canary 环境下：devDeps train 与 baseline 车次（重生成后）为新版本，
-   `engines.dsh` 下界与 `ci.yml` `dshVersion` 仍是旧版本——754 行与 757 行的断言
-   必然失败。
-
-**后果**：
-
-- "绿后 artifact 即 §5 重验 commit 的全部材料"这条主干路径在列车前移场景下
-  不可达；canary 只会产出红 run 与（`if: always()` 上传的）不完整 artifact。
-- 红色信号语义混杂：纪律性红（lockstep 预期失败）与上游真破坏红无法从 canary
-  结果上区分，而区分这两者正是 canary 存在的目的。
-
-**时间线佐证（该矛盾从未被真实运行暴露）**：
-
-- `98172b6`（2026-11-11）canary 落地；夜间绊线于 11-12、11-13（04:23 UTC）触发，
-  因 `SubagentActivationSpec` 真实破坏而红（`067147f` commit message 自述）。
-- `217929e`（2026-11-13 18:23）seam-verify 连同 `probeVersionLockstep` 才落地，
-  晚于最后一次真实 canary 触发；18:57 的 rc.3 收编（`067147f`）为人工本地完成
-  （engines 下界、CI `dshVersion`、devDeps、baseline 四处同时改，故本地绿）。
-- 即：带 lockstep 探针的 canary 尚未经历过任何一次列车前移运行。
-
-## P2（盲区 + 文档失实）：重发布检测只锚定 bellwether 包
-
-**现象**：绊线对"同版本重发布"的检测只读取 `@deepseek-ai/dsh` 本体一个包的
-registry `time`，子包重发布不可见；而项目记录的唯一一次真实事故恰是子包重发布。
+**现象**：若 dist-tag `next` 某天指向带 build metadata 的版本
+（如 `0.2.2-rc.4+build.1`），写模式会产出一个 lockstep 探针必然拒绝的
+package.json——这正是上一轮 P1 的故障形态，且恰好发生在 P10 修复
+（exact-version 认 build metadata）声称支持的输入类别上。
 
 **证据链**：
 
-1. `scripts/bump-upstream.mjs:38-40`：`BELLWETHER`/`REGISTRY_URL` 只指向
-   `@deepseek-ai/dsh`；104-124 行的重发布检测比较的是该包
-   `time[target]` 与 `baseline.json` 的 `generatedAt`。
-2. `docs/versioning.md` §2 背景事故（55-57 行）：2026-11-09 事故为
-   `@deepseek-ai/dsh-subagent@0.2.2-rc.1` **同版本重发布**（子包）。
-   若 dsh 本体未同步重发，`time` 比较不触发。
-3. `docs/versioning.md` §4 S2 行（89 行）声称"列车前移**或同版本重发布**都触发"，
-   与实现不符。
+1. `scripts/bump-upstream.mjs:215`：devDeps 各条目钉到**完整 target**
+   （含 `+build` 后缀）。
+2. `scripts/bump-upstream.mjs:196`：`floor = target.replace(/\+[0-9A-Za-z.-]+$/, '')`
+   ——engines 下界**剥掉** build metadata；202 行据此生成 `enginesRange`，
+   220 行写入。
+3. `tests/seam-verify.test.ts:757`：`assert.equal([...train][0], floor)` 是
+   精确字符串比较；`'0.2.2-rc.4+build.1' !== '0.2.2-rc.4'` 必然失败。
+   773 行的 baseline 列车断言同样失配（lockfile 的 `version` 字段携带完整
+   版本串）。
+4. 覆盖缺口：`tests/bump-upstream.test.ts` 只覆盖了"依赖规格带
+   `+build.7`、target 干净"的方向（68 行、120 行）；"target 本身带 build
+   metadata"的方向无任何测试。
 
-**后果**：子包单独同版本重发布时，日绊线不触发。现存缓解只有两条：S1 的
-`npm ci` EINTEGRITY（仅在 push/PR 时运行）与周一兜底全量 run；无提交的周内，
-盲区最长约 7 天。
+**后果**：该输入类别下"绿 canary → artifact 收编"主干不可达，且红色是
+纪律性红（自造的失配），与上游真破坏红无法区分——P1 修复所要消灭的信号
+混杂在该输入类别上原样复现。失败是响亮的（lockstep 红），非静默。
+当前上游未向 `next` 发过 build-metadata 版本，属未触发的输入类别。
 
-## P3（覆盖面 + 文档失实）：canary 绿不含真实宿主安装冒烟
+## N2（轻微）：seam 文档兜底指引指向已删除的 S1 步骤
 
-**现象**：canary 的验证止于 `npm run check` + `check:compat`（两者都只针对
-node_modules 中安装的包），不运行 S1 的真实 dsh CLI 安装冒烟；插件经
-bundle patch 注册进宿主的路径没有任何 canary 覆盖。
+**证据**：`docs/seam-driven-verification.md:162`（"包不住的部分 §3"的
+"怎么补"）仍写"只有等到 S1 的'装进真实 `dsh` CLI 跑 `--dump-config`'
+……才能发现"。该步骤恰在此前的重构中从 `ci.yml` 整体移除
+（`ci.yml:56-62` 现为"Real host mounting is NOT checked through a
+third-party action"的说明注释）。`docs/versioning.md` 已如实记录弃用决策，
+这份交叉引用漏改。读者会以为那道安全网仍然存在。
 
-**证据链**：
-
-1. `canary.yml` 的 canary job 步骤为 bump → 重装 → 重生成 baseline →
-   `npm run check` → `check:compat` → 上传 artifact；无安装冒烟步骤。
-2. `.github/workflows/ci.yml` 的安装冒烟步骤（`bowenliang123/dsh-plugin-checker`，
-   `dshVersion: 0.2.2-rc.3`）只在 push/PR 触发，且版本钉在**已收编**的列车上。
-3. 插件经 `package.json` 的 `dsh.bundle.patch`（`cordis.patch.yml` 注入 config
-   条目）向宿主注册，该路径只有 S1 的真实安装冒烟覆盖。
-4. `docs/seam-driven-verification.md`（157-160 行，"包不住的部分 §3"）承认此
-   gap 并指出只有 S1 能发现；但 `docs/versioning.md` §4 描述 canary 时未说明
-   该语义收窄。
-
-**后果**：canary 绿只证明"类型检查、测试、官方兼容门在新包上通过"，不证明
-"插件能装进新版本的真实 dsh 并挂载"；收编决策基于前者，安装失败最早在收编
-commit 的 S1 才暴露。
-
-## P4（计划烂尾）：隐性嫌疑扫描停留在 advisory
-
-**现象**：既定计划写明阶段 B（探路插件验货器）完成后将未报备嫌疑改为硬门禁；
-阶段 B 已落地，硬门禁未做，三份文档口径不一。
+## N3（轻微）：bundle patch 应用路径零覆盖，等价性表述偏满
 
 **证据链**：
 
-1. `docs/seam-driven-verification.md:86`："第一版先只打印报备单（不 exit 1），
-   **等阶段 B 完成后再改成硬门禁**"；同文执行计划（176-179 行）阶段 B 即
-   commit 3。
-2. 阶段 B 已落地（`217929e`，2026-11-13），但
-   `scripts/analyze-dsh-coupling.mjs:737-781`（`suspectSection`）对未报备嫌疑
-   仍只打印；脚本头部注释（43-47 行）亦声明
-   "unacknowledged suspects are advisory only and never change the exit code"。
-3. `docs/versioning.md` §5（125 行）与 `docs/upstream-audit.md` §0（19 行）只写
-   "报备"，未提硬门禁的后续口径。
+1. `cordis.patch.yml` 经 `package.json` 的 `dsh.bundle.patch` 由宿主 profile
+   机制（`dsh plugin add`）消费。该应用路径在 S1/S2 均无验证：两条工作流的
+   pack 冒烟只断言文件在 tarball 里（`ci.yml:54`、`canary.yml:110` 的
+   `test -f smoke/package/cordis.patch.yml`）。
+2. 删除 dsh-plugin-checker 后，"loader 挂载面"确有真实覆盖
+   （`tests/integration/harness.test.ts:63-66` 经真实
+   `cordis-plugin-loader` 挂载本插件），但 bundle-patch 应用不属于 loader
+   路径，两者不等价。
+3. `docs/versioning.md:88` 写"真实挂载由 seam-verify + 集成测试覆盖"，
+   §7 证据索引写"覆盖更深的挂载面"——对 loader 挂载成立，对 bundle-patch
+   应用不成立。
 
-**后果**：未报备嫌疑的报备单没有任何机制保证被人看到（尤其它只在
-`--check` 与默认模式的 stdout 里）；计划承诺的门禁状态与实现、文档三方不一致。
+**后果**：宿主 profile 机制（`insert` 的 patch 格式语义）变化时，
+S1/S2 全绿而真机 `dsh plugin add` 失效，与上一轮 P3 指出的缺口同类，
+只是现在两道门禁都不再覆盖它，且文档以等价性表述盖过了残余缺口。
 
-## P5（流程缺口）：跨 minor 收编流程未定义
+## N4（属性，需知晓）：嫌疑硬门禁的行号锚定摩擦
 
-**现象**：`engines.dsh` 上界（`>=0.2.2-rc.3 <0.3.0-0`）配合单线跟随策略，
-意味着上游发 0.3.0-rc.1 时 canary 必红且 artifact 必不完整；该情形与同 minor
-前移是两种不同流程，文档只描述了一种。
+**证据**：`tests/contracts/implicit-seams.ts` 的 68 处 acknowledged 全部为
+行号/区间锚定，`/pattern/` 语法一处未用（文件头声明的正则锚形式）。硬门禁
+（`9bd3270`）生效后，任何在认可区间上方插行都会让 `--check` 红；与
+`coupling.json`（一条 `--write` 机械重生成）不同，隐性清单的区间重锚是
+手工活。这是"conscious update"纪律的一贯延伸，非缺陷；摩擦不对称是它的
+代价。
+
+## N5（轻微，既有残余，非当轮引入）：canary 重锚窗口的重发布竞态
+
+**证据**：绊线以 `baseline.json` 的 `generatedAt` 为锚
+（`scripts/bump-upstream.mjs:153-185`），而 canary 的 `npm install` 与
+`write-baseline` 之间若发生同版本重发布：安装内容为发布前旧内容，
+`generatedAt` 晚于发布时间，下一次绊线判定"未变化"。窗口为分钟级；
+下次列车移动或周一兜底重装后自愈。上一轮 bellwether-only 实现同样存在，
+此处仅登记残余。
+
+---
+
+# 第三轮发现（2026-11-14）
+
+## R1（中等）：build-metadata 版本目标在本仓策略下仍自造 lockstep 红（N1 未解决，实证补全）
+
+**现象**：本轮新增的 range 模式是逃生口而非修复——`docs/versioning.md`
+§4 明确"当前策略仍是单线跟随"（single-line），而默认写模式对 `+build`
+target 产出的组合在 single-line 探针下必然红。
 
 **证据链**：
 
-1. 跨 minor 前移时：`probeVersionLockstep` 红（P1 的机制），`check-compat.mjs`
-   的官方闸门判定也红（`<0.3.0-0` 拒绝 `0.3.0-rc.1`，后者是正确行为）。
-2. canary artifact 仅含 `package.json` + `package-lock.json` + `baseline.json`
-   （`canary.yml` "Upload the revalidation material" 步骤），不含
-   `engines.dsh` / `ci.yml` `dshVersion` 改动。
-3. `docs/versioning.md` §4 的"artifact（package.json + lockfile + baseline.json）
-   即 §5 重验 commit 的全部材料"只对不触动 engines 上界的同 minor 前移成立；
-   §5 重验流程未区分两种情形。
+1. `scripts/bump-upstream.mjs:214`：`const floor = target.replace(/\+[0-9A-Za-z.-]+$/, '')`
+   ——engines 下界剥掉 build metadata；`:261`：
+   `manifest[move.field][move.name] = target`——devDeps 钉到完整 target
+   （含 `+build`）。口径分叉与 N1 所述一致，仅行号漂移。
+2. `tests/seam/engine.ts:563`：`assert.equal(trainVersion, floorOf(), …)`
+   精确字符串比较；`:583` baseline 指纹列车与 floor 的比较同为精确串
+   （lockfile 的 `version` 字段携带完整版本串）。
+3. **实证（2026-11-14，临时夹具直调 dist-test 引擎）**：构造 bump 写模式
+   对 `+build` target 会产出的精确组合（devDeps
+   `0.2.2-rc.4+build.1`、`engines.dsh >=0.2.2-rc.4 <0.3.0-0`、baseline
+   指纹 `0.2.2-rc.4+build.1`）喂给 `probeVersionLockstep`：single-line 报
+   `'0.2.2-rc.4+build.1' !== '0.2.2-rc.4'`（红），range 通过。
+4. 覆盖缺口延续：`tests/bump-upstream.test.ts` 新增的 51 行 `--keep-floor`
+   测试只覆盖干净版本方向（rc.4 与越墙 rc.1），"target 带 build metadata"
+   方向两轮累计零覆盖。
 
-**后果**：第一次 0.3.0-rc 出现时，"红 canary → 如何收编"没有可循文档；
-"artifact 即全部材料"的表述在该场景下失实。
+**后果**：同 N1——上游把 `next` 指向 `+build` 版本时，绿 canary →
+artifact 收编主干不可达，且红是纪律性红、与上游真破坏红不可区分。
 
-## P6（实现细节）：baseline 指纹的嵌套路径键名处理错误
+## R2（中等）：两份 `compareVersions` 均不解析 build metadata，localeCompare 兜底方向可错，静默放行已实证
 
-**证据**：`scripts/write-baseline.mjs:36-44` 用
-`key.startsWith('node_modules/@deepseek-ai/')` 前缀截取生成键名。嵌套依赖的
-lockfile 键（`node_modules/@deepseek-ai/foo/node_modules/@deepseek-ai/bar`）
-同样命中该前缀，生成的键名为 `foo/node_modules/@deepseek-ai/bar`。同时
-`tests/seam-verify.test.ts:761` 用 `name.startsWith('dsh-')` 过滤列车成员，
-形如 `dsh-foo/node_modules/...` 的嵌套键会被误计入列车版本集合，可能使
-"恰好一条列车"的断言（763 行）失真。当前依赖树全平铺，未触发；属隐含假设。
+**证据链**：
 
-## P7（实现细节）：周兜底判定依赖重复的 cron 字符串
+1. `tests/seam/engine.ts:493` 与 `scripts/bump-upstream.mjs:305` 的解析正则
+   `^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$` **均无 build-metadata 组**；
+   `+build` 版本落 `a.localeCompare(b)` 兜底（engine.ts:501 /
+   bump-upstream.mjs:283）。localeCompare 是 locale 相关的字典序，非 semver。
+2. **实测**：`'0.2.2-rc.4+build.1'.localeCompare('0.2.10')` 返回 `1`，
+   semver 真值为 `<0`（0.2.10 更新）。
+3. **静默放行实证（夹具直调引擎）**：floor `0.2.10` + 列车
+   `0.2.9+build.1`（semver 明确低于下界，应拒）在 range 模式下 PASS；
+   `--keep-floor` 的准入检查（`scripts/bump-upstream.mjs:242`）用同一算法，
+   同样放行——"越墙即拒绝写入（拒绝零写入）"的保证在该输入类上失守。
+4. 与声明的冲突：`docs/versioning.md` §4 逃生口写"写入前先经官方 gate
+   验证目标落在现有区间内"；`docs/seam-driven-verification.md` 写"含
+   `-0` 墙语义、与 check-compat.mjs 官方 gate 相同的下界/`-0` 墙语义"。
+   实际裁决来自本地比较器，且恰在 P10 打开的输入类（`EXACT_VERSION` 认
+   `+build`，`bump-upstream.mjs:82`）上退化。最终兜底是 `check:compat`
+   的官方 gate（低于下界的运行时会被拒），不会漏到用户，但失败形态与
+   真因不一致。
+5. 附注：engine 与 bump-upstream 是两份手工同步的 `compareVersions` 副本
+   （引擎不 import `@deepseek-ai/dsh-app-boot` 的理由成立），文档称
+   "同一套算法"，但没有任何共享测试向量钉住两边同步——本条"两边一起漏"
+   即其例证。
 
-**证据**：`canary.yml` 的 `on.schedule` 定义 `"37 4 * * 1"`，canary job 的
-`if` 条件里以字面量 `github.event.schedule == '37 4 * * 1'` 再次出现。两处
-需同步维护；只改其中一处时，周兜底静默退化为"仅周一绊线照常、全量 run 不再
-触发"，无任何报错。
+## R3（轻微）：`--keep-floor` 外层注释陈述了实现中不存在的保证
 
-## P8（实现细节）：seam-verify 的 hook 定位退化为文本 grep
+**证据**：`scripts/bump-upstream.mjs:222-225` 写"The official gate decides
+(same ruling as scripts/check-compat.mjs's boundary probes …); this script
+never reimplements semver"——与实现（本地 `compareVersions`）直接矛盾；
+内层注释（`:230-232`）与文件头（`:30-36`）如实说明了实际实现。这恰是
+全文件安全最敏感的检查（越墙准入），注释却陈述了一个不存在的保证。
 
-**证据**：`tests/seam-verify.test.ts:401-410`（`hookSite`）在固定候选文件里以
-`line.includes("ctx.on('${event}'")` 定位 hook 注册点，假定单引号、直接调用
-形态与固定文件列表。耦合扫描器（`analyze-dsh-coupling.mjs`）本身是 AST 的，
-此处与其风格不一致；源码改为双引号、提取变量或移动文件时会 throw（响亮失败，
-非静默）。
+## R4（轻微）：verify-coupling 的 TS18047 豁免臂不限定 JsonValue，豁免面不可见
 
-## P9（实现细节）：check-compat 对 engines 对象整体缺失报错不友好
+**证据**：`scripts/verify-coupling.mjs:28` 的豁免谓词中，第二臂
+`/^TS2339:.*JsonValue/` 用 JsonValue 收窄了，第一臂 `/^TS18047:/` 没有
+——独立验货路径上任何"唯一诊断是 possibly-nullish"的探针一律静默豁免，
+与 JsonValue 无关。上游把某字段改为可空、探针恰好只报 TS18047 时，CLI 会
+把它记为豁免而非失败。同时 `:54-55` 只打印豁免**计数**（"N runtime-contract
+surface(s) exempt"）、不列名，豁免了哪些面不可见。全套件路径不受影响
+（本仓这些面走 unverifiable 库 + implicit 探针），但 CLI 的服务对象恰是
+任意外来 coupling.json。
 
-**证据**：`scripts/check-compat.mjs:95-97` 在进入边界探针之前先构造
-`label`（内插 `manifest.engines.dsh`）。`engines` 对象整体缺失时，
-97 行直接 `TypeError: Cannot read properties of undefined`，而非走
-`failUnparseableRange` 里"engines.dsh is missing"的友好路径。退出码仍非 0
-（响亮），仅报错形态退化。`tests/check-compat.test.ts:72-88` 只覆盖了
-"删除 `dsh` 键但保留 `engines` 对象"的场景。
+## R5（轻微，既有，非本轮引入）：扫描器源文件含字面 NUL 字节
 
-## P10（实现细节）：精确版本正则不认 build metadata
+**证据**：`scripts/analyze-dsh-coupling.mjs:1020`（文件偏移 45799）的
+Map 键 `` `${event}\x00…` `` 写的是**原始 NUL 字节**而非 `\x00` 转义文本，
+`file` 判为 "binary data"、`grep` 报 "binary file matches" 并吞掉行号
+（第三轮复审中 `grep '\.sites'` 实际被挡）。57b88b8 已有此字节；本轮
+该文件 +209 行、成为守卫提取的独占真相源后，工具链可见性的代价上升。
 
-**证据**：`scripts/bump-upstream.mjs:42` 的
-`EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/` 不匹配带
-`+build` 后缀的 semver。若上游某天发布带 build metadata 的版本，该条目会被
-排除出 train（bump 不改写它），而 `probeVersionLockstep` 的 train 集合
-（不校验格式）仍会收它，造成两处对"train"的口径分叉。当前上游未发此类版本。
+## R6（备忘，工作区）：文档收尾未落
+
+**证据**：`docs/RESERACH.md` 未跟踪且文件名拼写错误（应为 RESEARCH；
+文内自称 "SURVEY.md"）；`docs/upgrade-detection-review.md`（本文件）为
+未提交的工作区修改。

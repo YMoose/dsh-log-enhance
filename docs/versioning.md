@@ -85,7 +85,7 @@ CI 配置本身不是证据）：
 | 阶段 | 触发 | 内容 | 参考实现 |
 |---|---|---|---|
 | S0 本地基线 | — | lockfile、engines.dsh、版本单源、baseline 机制、修集成测试 | 本文 |
-| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测（含 seam-verify 探针）→ 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → coupling 门禁 → `npm pack` 产物冒烟 | 本仓 `ci.yml`（2026-11-13 起不再用第三方 dsh-plugin-checker：真实挂载由 seam-verify + 集成测试覆盖，workflow 不携带版本号） |
+| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测（含 seam-verify 探针）→ 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → coupling 门禁 → `npm pack` 产物冒烟 | 本仓 `ci.yml`（2026-11-13 起不再用第三方 dsh-plugin-checker；workflow 不携带版本号。挂载覆盖以 **loader 路径**为准：seam-verify 探针 + 集成测试经真实 cordis-plugin-loader 挂载；`cordis.patch.yml` 经宿主 profile（`dsh plugin add`）的**应用路径** S1/S2 均无验证，pack 冒烟只断言文件在 tarball 内——登记在案的残余缺口） |
 | S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或任一列车成员同版本重发布**（主包 + 全部 dsh-* 子包逐一比对，不只主包）都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`；devDeps 与 engines.dsh **同一次原子推进**，上界随次 minor 重算 `-0`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` + coupling 门禁 + pack 冒烟（**与 S1 完全同一覆盖面**，绿 canary = 绿 S1 在新列车上的等价物）→ 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的**全部**材料（engines.dsh 已随 bump 推进，无需手改任何文件），跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
 | S3 多线兼容矩阵 | ✗ **已取消**（2026-11-13 定策：单线跟随，见下） | ~~对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆~~（原方案存档备查） | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
 
@@ -196,6 +196,7 @@ baseline 重锚即可）；**重验流程**（baseline/coupling 红了走 §5 �
   beibeihk/dsh-agent-observability（带日期证据文档）、bowenliang123/dsh-context
   （基线 tag 宿主源码矩阵、OIDC 发布、tag↔版本断言）、bowenliang123/dsh-plugin-checker
   （安装冒烟 action，休眠中——2026-11-13 起本仓弃用：seam-verify 探针 + 集成测试
-  覆盖更深的挂载面，且 workflow 无需携带版本号）
+  覆盖更深的挂载面——**loader 挂载路径**；`cordis.patch.yml` 的 profile 应用路径
+  仍无覆盖——且 workflow 无需携带版本号）
 - npm dist-tag 陷阱：`@deepseek-ai/dsh` latest=next=0.2.2-rc.1，但多数子包
   latest 卡死 0.0.1-rc.1
