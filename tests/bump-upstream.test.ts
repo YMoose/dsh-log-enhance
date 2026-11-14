@@ -17,8 +17,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
  * `probeVersionLockstep` failed on EVERY train move — a disciplinary red
  * indistinguishable from a real upstream break (review P1/P5).
  *
- * Scenarios drive the script through `DSH_LOG_ENHANCE_MANIFEST` /
- * `DSH_LOG_ENHANCE_BASELINE` / `DSH_LOG_ENHANCE_REGISTRY` against an offline
+ * Scenarios drive the script through `DSH_SEAM_MANIFEST` /
+ * `DSH_SEAM_BASELINE` / `DSH_SEAM_REGISTRY` against an offline
  * `file://` fixture registry; the real package.json and baseline.json are
  * never touched.
  */
@@ -82,9 +82,9 @@ function runScript(args: string[], at: Fixture, registryBase: string) {
     timeout: 30_000,
     env: {
       ...process.env,
-      DSH_LOG_ENHANCE_MANIFEST: at.manifestPath,
-      DSH_LOG_ENHANCE_REGISTRY: registryBase,
-      DSH_LOG_ENHANCE_BASELINE: at.baselinePath,
+      DSH_SEAM_MANIFEST: at.manifestPath,
+      DSH_SEAM_REGISTRY: registryBase,
+      DSH_SEAM_BASELINE: at.baselinePath,
     },
   })
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
@@ -363,6 +363,78 @@ test('--keep-floor admits a target equal to the floor modulo build metadata (R2 
     const manifest = readManifest(at)
     assert.equal(manifest.devDependencies['@deepseek-ai/dsh-agent'], '0.2.2-rc.3+build.7')
     assert.equal(manifest.engines.dsh, '>=0.2.2-rc.3 <0.3.0-0', 'same-precedence target keeps the floor')
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('check mode fails loudly when a train member has no publish time in the registry', () => {
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.3' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED },
+      versions: { '0.2.2-rc.3': {} },
+    },
+    '@deepseek-ai/dsh-agent': member({ '0.2.2-rc.3': RC3_PUBLISHED }),
+    '@deepseek-ai/dsh-llm': member({ '0.2.2-rc.3': RC3_PUBLISHED }),
+    '@deepseek-ai/dsh-subagent': member({}),
+  })
+  try {
+    const { status, stdout, stderr } = runScript(['--check'], at, registry.base)
+    assert.equal(status, 1, `${stdout}\n${stderr}`)
+    assert.match(stderr, /no parseable publish time/)
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('default write mode refuses when registry next tag downgrades the current train (H2)', () => {
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.1.0-rc.1' },
+      time: { '0.1.0-rc.1': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.1.0-rc.1': {} },
+    },
+  })
+  try {
+    const before = readFileSync(at.manifestPath, 'utf8')
+    const { status, stdout, stderr } = runScript([], at, registry.base)
+    assert.equal(status, 1, `${stdout}\n${stderr}`)
+    assert.match(stderr, /REFUSED:.*downgrades/)
+    assert.equal(readFileSync(at.manifestPath, 'utf8'), before)
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('check mode reports UPSTREAM_CHANGED=yes when a train member lags behind the majority version (H3)', () => {
+  const at = fixture()
+  const skewedManifest = JSON.parse(readFileSync(at.manifestPath, 'utf8')) as {
+    devDependencies: Record<string, string>
+  }
+  skewedManifest.devDependencies['@deepseek-ai/dsh-subagent'] = '0.2.2-rc.1'
+  writeFileSync(at.manifestPath, `${JSON.stringify(skewedManifest, null, 2)}\n`)
+
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.3' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED },
+      versions: { '0.2.2-rc.3': {} },
+    },
+    '@deepseek-ai/dsh-agent': member({ '0.2.2-rc.3': RC3_PUBLISHED }),
+    '@deepseek-ai/dsh-llm': member({ '0.2.2-rc.3': RC3_PUBLISHED }),
+    '@deepseek-ai/dsh-subagent': member({ '0.2.2-rc.1': RC3_PUBLISHED, '0.2.2-rc.3': RC3_PUBLISHED }),
+  })
+  try {
+    const { status, stdout, stderr } = runScript(['--check'], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    assert.match(stdout, /^UPSTREAM_CHANGED=yes$/m)
+    assert.match(stdout, /dsh-subagent@0\.2\.2-rc\.1/)
   } finally {
     rmSync(at.dir, { recursive: true, force: true })
     rmSync(registry.dir, { recursive: true, force: true })

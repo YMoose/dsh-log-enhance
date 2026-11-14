@@ -10,36 +10,53 @@
  * on it alone and ignores peerDependencies; the whole parsed manifest is passed
  * so the gate also throws on malformed engines/peer fields.
  *
- * The runtime version defaults to the installed app-boot package's version —
- * the same train pinned by the devDependency and fingerprinted in
- * baseline.json, so this script has no version number of its own to maintain.
+ * The runtime version defaults to the installed app-boot package's version.
+ * This is the same version pinned by the devDependency and recorded in
+ * baseline.json, so this script has no separate version number to maintain.
  *
  * Exit 0: compatible (and declared range admits its own lower bound while
  * rejecting the first prerelease past its upper bound). Exit 1: not — and also
  * exit 1 when either boundary probe cannot be derived from the range text, so a
  * range rewrite can never turn these assertions into silent no-ops.
  *
- * @module dsh-log-enhance/scripts/check-compat
+ * @module dsh-seam/scripts/check-compat
  */
 
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import {
+/**
+ * The manifest under test. `DSH_SEAM_MANIFEST` (with `DSH_LOG_ENHANCE_MANIFEST`
+ * fallback) overrides the path so the regression tests can feed deliberately
+ * malformed ranges without editing the real package.json.
+ */
+const manifestOverride = process.env.DSH_SEAM_MANIFEST ?? process.env.DSH_LOG_ENHANCE_MANIFEST
+const MANIFEST_URL = manifestOverride
+  ? pathToFileURL(resolve(process.cwd(), manifestOverride))
+  : new URL('../package.json', import.meta.url)
+
+async function loadAppBoot() {
+  const anchors = [
+    MANIFEST_URL.href,
+    pathToFileURL(resolve(process.cwd(), 'package.json')).href,
+    import.meta.url,
+  ]
+  for (const anchor of anchors) {
+    try {
+      const resolved = createRequire(anchor).resolve('@deepseek-ai/dsh-app-boot')
+      return await import(pathToFileURL(resolved).href)
+    } catch {}
+  }
+  return await import('@deepseek-ai/dsh-app-boot')
+}
+
+const {
   evaluatePluginCompatibility,
   getDshRuntimeVersion,
   pluginCompatibilityWarning,
-} from '@deepseek-ai/dsh-app-boot'
-
-/**
- * The manifest under test. `DSH_LOG_ENHANCE_MANIFEST` overrides the path so
- * the regression tests can feed deliberately malformed ranges without editing
- * the real package.json.
- */
-const MANIFEST_URL = process.env.DSH_LOG_ENHANCE_MANIFEST
-  ? pathToFileURL(resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_MANIFEST))
-  : new URL('../package.json', import.meta.url)
+} = await loadAppBoot()
 
 /** Render an issue with both the official human diagnostic and the raw record. */
 function detail(issue) {

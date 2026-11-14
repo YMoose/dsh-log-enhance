@@ -1,89 +1,323 @@
 #!/usr/bin/env node
 /**
- * Mechanical inventory of this repository's coupling to DeepSeek packages.
+ * 根据插件源码生成 DeepSeek 上游依赖清单。使用 TypeScript AST 分析语法，
+ * 不直接用正则匹配整段源码。
  *
- * What it extracts (AST-based, no regex over source text):
- *   - Layer 0: every `@deepseek-ai/*` import — static or dynamic — classified
- *     by file root (src / tests / scripts), by kind (`import type` / value),
- *     and by the package.json field declaring the package.
- *   - Layer 1 (src only): `ctx.on('<event>', …)` hook registrations with their
- *     callback parameter shape (destructured names are the field surface),
- *     `ctx.<service>` accesses (casts unwrapped), and dotted field paths read
- *     on parameters annotated with imported DeepSeek types — attributed to
- *     the package the annotation type came from. Each field path keeps every
- *     reading site (`file:line`) with the root type it was read through AND
- *     the guard context it runs under (case labels, early-return negations,
- *     optional chains — `{ expr, kind: eq|ne|defined|falsy, literal? }`), so
- *     a renamed property is traceable to the code that breaks and the seam
- *     verifier can probe each access exactly as narrowly as the plugin
- *     itself reads it.
- *   - Layer 1 extras with no annotation to lean on: `export const inject`,
- *     string-literal discriminants (`switch (event.type)` cases and
- *     `event.type === '…'` comparisons), `for (const x of event.data.items)`
- *     element variables (recorded as `data.items[].field`), and `ctx.on`
- *     callbacks whose payload parameters are not annotated — those field reads
- *     are attributed to `event:<event>` because the owning package is not
- *     knowable from source alone.
- *   - Layer 3: hook/emit touch points used by tests (verification contracts)
- *     and packages that only tests/scripts import.
+ * 提取内容：
+ *   - 所有 `@deepseek-ai/*` 静态和动态 import，按 src / tests / scripts、
+ *     类型或值导入，以及 package.json 中的声明字段分类。
+ *   - src 中的 `ctx.on('<event>', …)` 注册及回调参数形状、`ctx.<service>`
+ *     访问，以及带有上游类型注解的参数字段读取。每条字段路径保留所有
+ *     `文件:行号` 访问位置、根类型和实际生效的类型收窄条件，包括 case、
+ *     提前返回和可选链。这样上游字段改名或类型变化可以定位到具体源码。
+ *   - 没有类型注解可依赖的信息：`export const inject`、字符串判别值、
+ *     `for…of` 遍历元素的字段，以及未标注类型的 hook 载荷字段。后者记录在
+ *     `event:<event>` 下，因为仅凭源码无法确定声明它的上游包。
+ *   - tests 中的 hook/emit 调用，以及仅由 tests/scripts 引入的包。
  *
- * What it deliberately does NOT extract: layer 2 — on-disk format and
- * semantic contracts (storage layout, zstd container, `started subagent`
- * text protocol, message lifecycle ordering). Those are intent, not code
- * shape; they live in docs/upstream-audit.md and are maintained by hand.
+ * 不自动提取文件格式和业务语义，例如存储布局、zstd 容器、文本协议和消息
+ * 生命周期顺序。这些约束记录在 docs/upstream-audit.md 中，由人工维护。
  *
- * What it *suspects*: layer 2 cannot be extracted, but most layer-2 bets leave
- * a shape behind — a string-literal field read off an untyped record, a regex
- * over log text, a WeakMap keyed by an upstream object, a service probed
- * through a cast inside `try`. Those shapes are reported in `--check` against
- * `tests/contracts/implicit-seams.ts`: every suspect must be acknowledged by a
- * seam id or explicitly ignored as internal — in `--check` an unacknowledged
- * suspect (or an unloadable registry) fails the gate; the shape is evidence
- * of a bet, not a defect, so the default mode still just prints the draft.
+ * 对无法自动验证的隐含依赖，只报告可能相关的代码形状，例如无类型记录上的
+ * 字段读取、日志文本正则、以上游对象为键的 WeakMap，以及在 try 中通过类型
+ * 断言访问服务。`--check` 会要求这些位置在 tests/contracts/implicit-seams.ts
+ * 中关联到一条检查规则，或明确标记为本项目内部逻辑。扫描结果表示需要检查的
+ * 隐含依赖，不表示代码一定有缺陷；默认模式只输出报告草稿。
  *
- * Modes:
- *   (default)  print a markdown draft report to stdout.
- *   --write    write the canonical inventory to `coupling.json` (commit it).
- *   --check    regenerate and deep-compare against `coupling.json`; any drift
- *              (new hook, new value import, new field path) exits 1 — a
- *              coupling change must be a conscious update, mirroring what
- *              baseline.json does for dependency content. The implicit-contract
- *              suspect report gates the same run: an unacknowledged suspect or
- *              an unreadable tests/contracts/implicit-seams.ts also exits 1.
+ * 模式：
+ *   默认模式  向标准输出打印 Markdown 报告草稿。
+ *   --write   生成规范的 `coupling.json`，应提交到仓库。
+ *   --check   重新扫描并与 `coupling.json` 比较；新增 hook、值导入或字段路径等
+ *             差异会退出 1，要求明确更新清单。未确认的隐含依赖或无法读取
+ *             tests/contracts/implicit-seams.ts 也会退出 1。
  *
- * Testability: DSH_LOG_ENHANCE_ROOT redirects the repo root (coupling.json,
- * the source roots, and the seam registry all resolve under it — fixture
- * roots in tests/coupling-gate.test.ts).
+ * 测试重定向：DSH_SEAM_ROOT（兼容旧名 DSH_LOG_ENHANCE_ROOT）指定仓库根目录，
+ * coupling.json、源码目录和隐含依赖清单都从该目录解析。测试夹具见
+ * tests/coupling-gate.test.ts。
  *
- * Reusable in any dsh plugin repo as-is: the package scope and the three
- * source roots are the only conventions.
+ * 可复用于其他 DSH 插件仓库，只需遵循包 scope 和 src/tests/scripts 目录约定。
  *
- * @module dsh-log-enhance/scripts/analyze-dsh-coupling
+ * @module dsh-seam/scripts/analyze-dsh-coupling
  */
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import ts from 'typescript'
 
 const SCOPE = '@deepseek-ai/'
 const ROOTS = ['src', 'tests', 'scripts']
-const REPO_ROOT = process.env.DSH_LOG_ENHANCE_ROOT
-  ? resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_ROOT)
+const ROOT_OVERRIDE = process.env.DSH_SEAM_ROOT ?? process.env.DSH_LOG_ENHANCE_ROOT
+const REPO_ROOT = ROOT_OVERRIDE
+  ? resolve(process.cwd(), ROOT_OVERRIDE)
   : fileURLToPath(new URL('..', import.meta.url))
 const COUPLING_URL = join(REPO_ROOT, 'coupling.json')
 const MANIFEST_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies']
 
+function loadTypeScript() {
+  const anchors = [
+    import.meta.url,
+    pathToFileURL(join(REPO_ROOT, 'package.json')).href,
+    pathToFileURL(join(process.cwd(), 'package.json')).href,
+  ]
+  for (const anchor of anchors) {
+    try {
+      return createRequire(anchor)('typescript')
+    } catch {}
+  }
+  throw new Error(`cannot resolve package "typescript" from ${REPO_ROOT} or ${fileURLToPath(import.meta.url)}`)
+}
+
+const ts = loadTypeScript()
+
 const args = process.argv.slice(2)
-const known = new Set(['--write', '--check'])
+const known = new Set(['--write', '--check', '--json'])
 const unknownArgs = args.filter(argument => !known.has(argument))
 if (unknownArgs.length > 0) {
-  console.error(`unknown argument(s): ${unknownArgs.join(' ')}; usage: analyze-dsh-coupling.mjs [--write | --check]`)
+  console.error(`unknown argument(s): ${unknownArgs.join(' ')}; usage: analyze-dsh-coupling.mjs [--write | --check | --json]`)
   process.exit(1)
 }
-const MODE = args.includes('--write') ? 'write' : args.includes('--check') ? 'check' : 'report'
+const activeModes = ['--write', '--check', '--json'].filter(flag => args.includes(flag))
+if (activeModes.length > 1) {
+  console.error(`${activeModes.join(' and ')} are mutually exclusive; usage: analyze-dsh-coupling.mjs [--write | --check | --json]`)
+  process.exit(1)
+}
+const MODE = args.includes('--write') ? 'write' : args.includes('--check') ? 'check' : args.includes('--json') ? 'json' : 'report'
 
 // --- file discovery -----------------------------------------------------------
+
+function listDtsFiles(directory) {
+  const files = []
+  if (!existsSync(directory)) return files
+  try {
+    for (const entry of readdirSync(directory)) {
+      const full = join(directory, entry)
+      if (!statSync(full).isDirectory() && entry.endsWith('.d.ts')) files.push(full)
+    }
+  } catch {}
+  const srcDir = join(directory, 'src')
+  if (existsSync(srcDir)) {
+    const walk = current => {
+      for (const entry of readdirSync(current)) {
+        const full = join(current, entry)
+        if (statSync(full).isDirectory()) walk(full)
+        else if (entry.endsWith('.d.ts')) files.push(full)
+      }
+    }
+    try { walk(srcDir) } catch {}
+  }
+  return files.sort()
+}
+
+const TS_BUILTIN_TYPES = new Set([
+  'Array', 'ReadonlyArray', 'Readonly', 'Record', 'Partial', 'Required',
+  'Pick', 'Omit', 'Exclude', 'Extract', 'NonNullable', 'Promise', 'Map',
+  'Set', 'Date', 'RegExp', 'Error', 'Uint8Array', 'PromiseLike',
+  'Iterable', 'AsyncIterable',
+])
+
+const CORDIS_BUILTIN_CONTEXT_MEMBERS = new Set([
+  'on', 'once', 'emit', 'parallel', 'bail', 'serial', 'plugin', 'inject',
+  'provide', 'scope', 'registry', 'events', 'reflect', 'get', 'set',
+  'mixin', 'extend', 'isolate', 'effect', 'accept', 'dispose',
+])
+
+function isContextTypeText(annotation, contextTypeNames, localNames) {
+  if (annotation === null) return false
+  const core = unwrapReadonly(annotation).replace(/<.*>$/s, '').trim()
+  if (contextTypeNames.has(core)) return true
+  if (/^import\(\s*['"]@deepseek-ai\/cordis['"]\s*\)\.Context$/.test(core)) return true
+  const dot = core.indexOf('.')
+  if (dot !== -1) {
+    const ns = core.slice(0, dot).trim()
+    const member = core.slice(dot + 1).trim()
+    return localNames.get(ns) === '@deepseek-ai/cordis' && member === 'Context'
+  }
+  return false
+}
+
+function leftmostTypeIdentifier(typeName) {
+  let cursor = typeName
+  while (ts.isQualifiedName(cursor)) cursor = cursor.left
+  return ts.isIdentifier(cursor) ? cursor : null
+}
+
+function sanitizeAugmentationType(typeNode, source, localNames, localExportedNames, extraTypeParams = new Set()) {
+  if (typeNode === undefined) return 'any'
+  const scopedTypeParams = new Set(extraTypeParams)
+  const collectTypeParams = current => {
+    if (ts.isTypeParameterDeclaration(current)) scopedTypeParams.add(current.name.text)
+    ts.forEachChild(current, collectTypeParams)
+  }
+  collectTypeParams(typeNode)
+
+  // Object type literals may separate members by newlines — load-bearing
+  // syntax that the whitespace collapse below would erase (J2: `{ a: string`
+  // `\nb: number }` collapsed to `{ a: string b: number }`, an invalid type).
+  // Serialize literals member by member with explicit `; ` separators,
+  // recursing into member types so nested literals and identifier rewrites
+  // keep working.
+  if (ts.isTypeLiteralNode(typeNode)) {
+    const members = typeNode.members.map(member =>
+      augmentationMemberText(member, source, localNames, localExportedNames, scopedTypeParams))
+    return `{ ${members.join('; ')} }`
+  }
+
+  let valid = true
+  const replacements = []
+  const inspect = current => {
+    if (!valid) return
+    if (ts.isTypeQueryNode(current)) {
+      valid = false
+      return
+    }
+    if (ts.isImportTypeNode(current)) {
+      if (!(ts.isLiteralTypeNode(current.argument) && ts.isStringLiteral(current.argument.literal)
+        && current.argument.literal.text.startsWith(SCOPE))) {
+        valid = false
+        return
+      }
+    }
+    if (ts.isTypeReferenceNode(current)) {
+      const rootId = leftmostTypeIdentifier(current.typeName)
+      if (rootId === null) {
+        valid = false
+        return
+      }
+      const name = rootId.text
+      const pkg = localNames.get(name)
+      if (pkg !== undefined) {
+        const exported = localExportedNames.get(name)
+        const replacement = exported === '*'
+          ? `import('${pkg}')`
+          : `import('${pkg}').${exported ?? name}`
+        replacements.push({ start: rootId.getStart(source), end: rootId.getEnd(), text: replacement })
+      } else if (!TS_BUILTIN_TYPES.has(name) && !scopedTypeParams.has(name)) {
+        valid = false
+        return
+      }
+    }
+    ts.forEachChild(current, inspect)
+  }
+  inspect(typeNode)
+  if (!valid) return 'any'
+
+  const baseStart = typeNode.getStart(source)
+  const raw = typeNode.getText(source)
+  if (replacements.length === 0) return raw.replace(/\s+/g, ' ').trim()
+  replacements.sort((a, b) => b.start - a.start)
+  let out = raw
+  for (const rep of replacements) {
+    out = out.slice(0, rep.start - baseStart) + rep.text + out.slice(rep.end - baseStart)
+  }
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+/** One type-literal member, single-line, separators made explicit (J2). */
+function augmentationMemberText(member, source, localNames, localExportedNames, scopedTypeParams) {
+  const name = member.name === undefined ? '' : member.name.getText(source)
+  const optional = member.questionToken === undefined ? '' : '?'
+  const paramText = param => {
+    if (!ts.isIdentifier(param.name)) return param.getText(source).replace(/\s+/g, ' ').trim()
+    const prefix = `${param.dotDotDotToken !== undefined ? '...' : ''}${param.name.text}${param.questionToken !== undefined ? '?' : ''}`
+    const type = sanitizeAugmentationType(param.type, source, localNames, localExportedNames, scopedTypeParams)
+    return `${prefix}: ${type}`
+  }
+  if (ts.isPropertySignature(member)) {
+    const type = sanitizeAugmentationType(member.type, source, localNames, localExportedNames, scopedTypeParams)
+    return `${name}${optional}: ${type}`
+  }
+  if (ts.isMethodSignature(member)) {
+    const memberTypeParams = new Set(scopedTypeParams)
+    for (const tp of member.typeParameters ?? []) memberTypeParams.add(tp.name.text)
+    const typeParams = member.typeParameters === undefined || member.typeParameters.length === 0
+      ? ''
+      : `<${member.typeParameters.map(tp => tp.getText(source).replace(/\s+/g, ' ').trim()).join(', ')}>`
+    const params = member.parameters.map(paramText).join(', ')
+    const returnType = sanitizeAugmentationType(member.type, source, localNames, localExportedNames, memberTypeParams)
+    return `${name}${optional}${typeParams}(${params}): ${returnType}`
+  }
+  if (ts.isIndexSignatureDeclaration(member)) {
+    const params = member.parameters.map(paramText).join(', ')
+    const type = sanitizeAugmentationType(member.type, source, localNames, localExportedNames, scopedTypeParams)
+    return `${member.readonlyToken !== undefined ? 'readonly ' : ''}[${params}]: ${type}`
+  }
+  // Call/construct signatures and anything exotic: source text with whitespace
+  // collapsed. Nested literals inside these rare members keep the pre-J2
+  // behavior rather than failing outright.
+  return member.getText(source).replace(/\s+/g, ' ').trim()
+}
+
+function extractModuleAugmentations(source, localNames, localExportedNames, siteOf, onMember) {
+  const visit = current => {
+    if (ts.isModuleDeclaration(current) && ts.isStringLiteral(current.name)
+      && current.name.text.startsWith(SCOPE) && current.body !== undefined
+      && ts.isModuleBlock(current.body)) {
+      const pkg = current.name.text
+      for (const stmt of current.body.statements) {
+        if (!ts.isInterfaceDeclaration(stmt)) continue
+        const ifaceName = stmt.name.text
+        const ifaceTypeParams = new Set((stmt.typeParameters ?? []).map(tp => tp.name.text))
+        for (const member of stmt.members) {
+          const memberNameNode = member.name
+          if (memberNameNode === undefined
+            || (!ts.isIdentifier(memberNameNode) && !ts.isStringLiteralLike(memberNameNode)
+              && !ts.isNumericLiteral(memberNameNode))) continue
+          const memberName = memberNameNode.text
+          const site = siteOf(member)
+          const extractParams = (parameters, memberTypeParams) => {
+            const localParams = new Set(ifaceTypeParams)
+            for (const tp of memberTypeParams ?? []) localParams.add(tp.name.text)
+            return parameters.map((param, index) => {
+              const rawName = ts.isIdentifier(param.name) ? param.name.text
+                : param.name.getText(source) === 'this' ? 'this'
+                : `arg${index}`
+              const rest = param.dotDotDotToken !== undefined
+              const optional = param.questionToken !== undefined
+              let type = sanitizeAugmentationType(param.type, source, localNames, localExportedNames, localParams)
+              if (rest && type === 'any') type = 'any[]'
+              return {
+                name: rawName,
+                type,
+                ...(optional ? { optional: true } : {}),
+                ...(rest ? { rest: true } : {}),
+              }
+            })
+          }
+          if (ts.isMethodSignature(member)) {
+            onMember(pkg, ifaceName, memberName, {
+              kind: 'method',
+              params: extractParams(member.parameters, member.typeParameters),
+              site,
+            })
+          } else if (ts.isPropertySignature(member)) {
+            let memberType = member.type
+            while (memberType !== undefined && ts.isParenthesizedTypeNode(memberType)) {
+              memberType = memberType.type
+            }
+            if (memberType !== undefined && ts.isFunctionTypeNode(memberType)) {
+              onMember(pkg, ifaceName, memberName, {
+                kind: 'method',
+                params: extractParams(memberType.parameters, memberType.typeParameters),
+                ...(member.questionToken !== undefined ? { optional: true } : {}),
+                site,
+              })
+            } else {
+              onMember(pkg, ifaceName, memberName, {
+                kind: 'property',
+                type: sanitizeAugmentationType(member.type, source, localNames, localExportedNames, ifaceTypeParams),
+                optional: member.questionToken !== undefined,
+                site,
+              })
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(current, visit)
+  }
+  visit(source)
+}
 
 function listSourceFiles(directory) {
   const files = []
@@ -104,17 +338,78 @@ function listSourceFiles(directory) {
 function unwrap(node) {
   let cursor = node
   while (ts.isParenthesizedExpression(cursor) || ts.isAsExpression(cursor)
-    || ts.isNonNullExpression(cursor) || ts.isSatisfiesExpression(cursor)) {
+    || ts.isTypeAssertionExpression(cursor) || ts.isNonNullExpression(cursor)
+    || ts.isSatisfiesExpression(cursor)) {
     cursor = cursor.expression
   }
   return cursor
 }
 
-/** `ctx` (or `something.ctx`) at the base of an expression, casts unwrapped. */
-function isCtxBase(node) {
+/** Strip only wrappers that do not alter the expression's type or cast intent. */
+function unwrapValue(node) {
+  let cursor = node
+  while (ts.isParenthesizedExpression(cursor) || ts.isNonNullExpression(cursor)) cursor = cursor.expression
+  return cursor
+}
+
+const DEFAULT_CTX_NAMES = new Set(['ctx'])
+
+/** `ctx` (or `something.ctx`, or any `: Context` parameter in scope) at the base of an expression, casts unwrapped. */
+function isCtxBase(node, ctxNames = DEFAULT_CTX_NAMES) {
   const base = unwrap(node)
-  if (ts.isIdentifier(base)) return base.text === 'ctx'
+  if (ts.isIdentifier(base)) return ctxNames.has(base.text)
   return ts.isPropertyAccessExpression(base) && base.name.text === 'ctx'
+}
+
+const PARAMETER_NAMES = {
+  Context: 'ctx',
+  Agent: 'agent',
+  Session: 'session',
+  SessionEvent: 'event',
+  ToolExecution: 'exec',
+  'Readonly<ToolExecution>': 'exec',
+  'Readonly<ToolExecution>|ToolExecution': 'exec',
+  'Readonly<ToolExecutionResult>': 'result',
+}
+
+function unwrapReadonly(text) {
+  let core = text.trim()
+  for (;;) {
+    const wrapped = /^Readonly<(.*)>$/.exec(core)
+    if (wrapped === null) break
+    core = wrapped[1].trim()
+  }
+  return core
+}
+
+function splitTopLevelUnion(text) {
+  const parts = []
+  let depth = 0
+  let current = ''
+  for (const character of text) {
+    if (character === '<' || character === '(') depth += 1
+    if (character === '>' || character === ')') depth -= 1
+    if (character === '|' && depth === 0) {
+      parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += character
+  }
+  parts.push(current.trim())
+  return parts.filter(part => part !== '' && part !== 'undefined' && part !== 'null')
+}
+
+/** Canonical probe parameter name for a rootType (matches engine.ts's `parameterNameOf`). */
+function parameterNameOf(rootType) {
+  const known = PARAMETER_NAMES[rootType]
+  if (known !== undefined) return known
+  const members = splitTopLevelUnion(rootType)
+  const candidate = members.length === 1 ? members[0] : rootType
+  const core = unwrapReadonly(candidate)
+  if (PARAMETER_NAMES[core] !== undefined) return PARAMETER_NAMES[core]
+  const identifier = /([A-Za-z_$][\w$]*)\s*$/.exec(core)?.[1] ?? 'value'
+  return identifier.charAt(0).toLowerCase() + identifier.slice(1)
 }
 
 function importKindOf(clause) {
@@ -125,6 +420,15 @@ function importKindOf(clause) {
     : []
   if (clause.name === undefined && named.length > 0 && named.every(element => element.isTypeOnly)) {
     return 'type'
+  }
+  return 'value'
+}
+
+function exportKindOf(node) {
+  if (node.isTypeOnly) return 'type'
+  if (node.exportClause !== undefined && ts.isNamedExports(node.exportClause)) {
+    const elements = node.exportClause.elements
+    if (elements.length > 0 && elements.every(element => element.isTypeOnly)) return 'type'
   }
   return 'value'
 }
@@ -149,17 +453,25 @@ const EQUALITY = new Set([
   ts.SyntaxKind.ExclamationEqualsEqualsToken,
 ])
 
-/** `a.b.c` → `{ base: 'a', segments: ['b', 'c'] }`; anything else → null. */
+/** `a.b?.c` → `{ base: 'a', segments: ['b', 'c'], dotted: ['.b', '?.c'], hasCast }`; anything else → null. */
 function chainOf(node) {
   const segments = []
+  const dotted = []
+  let hasCast = false
   let cursor = node
   for (;;) {
-    cursor = unwrap(cursor)
+    while (ts.isParenthesizedExpression(cursor) || ts.isAsExpression(cursor)
+      || ts.isTypeAssertionExpression(cursor) || ts.isNonNullExpression(cursor)
+      || ts.isSatisfiesExpression(cursor)) {
+      if (ts.isAsExpression(cursor) || ts.isTypeAssertionExpression(cursor)) hasCast = true
+      cursor = cursor.expression
+    }
     if (!ts.isPropertyAccessExpression(cursor)) break
     segments.unshift(cursor.name.text)
+    dotted.unshift(`${cursor.questionDotToken !== undefined ? '?.' : '.'}${cursor.name.text}`)
     cursor = cursor.expression
   }
-  return ts.isIdentifier(cursor) ? { base: cursor.text, segments } : null
+  return ts.isIdentifier(cursor) ? { base: cursor.text, segments, dotted, hasCast } : null
 }
 
 /** `arr ?? []` / `arr || []` → `arr`, so a `for…of` alias keeps its source chain. */
@@ -184,11 +496,19 @@ function analyzeFile(path, root, state) {
   const text = readFileSync(path, 'utf8')
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.ESNext, true,
     path.endsWith('.mjs') ? ts.ScriptKind.JS : ts.ScriptKind.TS)
-  const file = `${root}/${relative(join(REPO_ROOT, root), path)}`
+  const file = `${root}/${relative(join(REPO_ROOT, root), path).replaceAll('\\', '/')}`
   const siteOf = node => `${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`
 
   // Local identifier → declaring package, for annotation attribution (src only).
   const localNames = new Map()
+  // Local identifier → original exported symbol name (or '*' for namespace import).
+  const localExportedNames = new Map()
+  // Local identifiers imported as `Context` from `@deepseek-ai/cordis`.
+  const contextTypeNames = new Set()
+  // Identifier names in scope currently typed as Cordis `Context`.
+  const ctxNames = new Set(['ctx'])
+
+  const isContextAnnotation = annotation => isContextTypeText(annotation, contextTypeNames, localNames)
 
   const recordImport = (specifier, kind) => {
     const entry = state.packages[specifier] ?? { roots: {} }
@@ -204,6 +524,9 @@ function analyzeFile(path, root, state) {
     const packages = new Set()
     for (const [name, specifier] of localNames) {
       if (new RegExp(`\\b${name}\\b`).test(annotation)) packages.add(specifier)
+    }
+    for (const match of annotation.matchAll(/import\(\s*['"](@deepseek-ai\/[^'"]+)['"]\s*\)/g)) {
+      packages.add(match[1])
     }
     return packages
   }
@@ -234,6 +557,14 @@ function analyzeFile(path, root, state) {
     entry.accesses.set(site, access)
     bucket.set(fieldPath, entry)
     state.fieldPaths[key] = bucket
+    if (rootType === 'Context' && fieldPath !== '') {
+      const firstSeg = fieldPath.split('.')[0].replace(/\[\]$/, '')
+      if (firstSeg !== '') {
+        const ctxBucket = state.ctxAccesses[firstSeg] ?? new Set()
+        ctxBucket.add(file)
+        state.ctxAccesses[firstSeg] = ctxBucket
+      }
+    }
   }
 
   const recordDiscriminant = (key, fieldPath, literal) => {
@@ -253,18 +584,29 @@ function analyzeFile(path, root, state) {
   const analyzeFunction = (node, event) => {
     if (root !== 'src' || node.body === undefined) return
 
-    const tracked = new Map() // local name → { keys, rootType, segments }
-    const track = (name, annotation, segments) => {
-      const packages = annotation === null ? new Set() : packagesOfAnnotation(annotation)
-      const keys = packages.size > 0 ? packages : event === null ? null : new Set([`event:${event}`])
+    const tracked = new Map() // local name → { keys, rootType, segments, exprPrefix, isCtx }
+    const track = (name, annotation, segments, exprPrefix, isCtx = false, customKey = null) => {
+      const packages = isCtx
+        ? new Set(['@deepseek-ai/cordis'])
+        : annotation === null ? new Set() : packagesOfAnnotation(annotation)
+      if (packages.size === 0 && annotation !== null && isUntypedShape(annotation)) return
+      const keys = packages.size > 0 ? packages : customKey === null ? null : new Set([customKey])
       if (keys === null) return
-      tracked.set(name, { keys, rootType: annotation ?? 'unknown', segments })
+      const rootType = isCtx ? 'Context' : (annotation ?? 'unknown')
+      tracked.set(name, { keys, rootType, segments, exprPrefix, isCtx })
     }
 
-    for (const parameter of node.parameters) {
+    node.parameters.forEach((parameter, paramIndex) => {
       const annotation = parameter.type === undefined ? null : parameter.type.getText(source)
+      const isCtx = isContextAnnotation(annotation)
+      const rootType = isCtx ? 'Context' : (annotation ?? 'unknown')
+      const customKey = event === null ? null : paramIndex === 0 ? `event:${event}` : `event:${event}#${paramIndex}`
+      const canonicalParam = annotation === null
+        ? (event !== null ? (paramIndex === 0 ? 'payload' : `payload_${paramIndex}`) : null)
+        : parameterNameOf(rootType)
+      const fallbackParam = paramIndex === 0 ? 'payload' : `payload_${paramIndex}`
       if (ts.isIdentifier(parameter.name)) {
-        track(parameter.name.text, annotation, [])
+        track(parameter.name.text, annotation, [], canonicalParam ?? parameter.name.text, isCtx, customKey)
       } else if (ts.isObjectBindingPattern(parameter.name)) {
         for (const element of parameter.name.elements) {
           if (element.dotDotDotToken !== undefined || !ts.isIdentifier(element.name)) continue
@@ -272,18 +614,24 @@ function analyzeFile(path, root, state) {
           const property = element.propertyName !== undefined && ts.isIdentifier(element.propertyName)
             ? element.propertyName.text
             : element.name.text
-          track(element.name.text, annotation, [property])
+          track(element.name.text, annotation, [property], `${canonicalParam ?? fallbackParam}.${property}`, isCtx, customKey)
         }
       }
-    }
+    })
     if (tracked.size === 0) return
 
-    const resolve = node => {
-      const chain = chainOf(node)
+    const resolve = targetNode => {
+      const chain = chainOf(targetNode)
       if (chain === null) return null
       const info = tracked.get(chain.base)
       if (info === undefined) return null
-      return { keys: info.keys, rootType: info.rootType, segments: [...info.segments, ...chain.segments] }
+      if (chain.hasCast && !info.isCtx) return null
+      return {
+        keys: info.keys,
+        rootType: info.rootType,
+        segments: [...info.segments, ...chain.segments],
+        expr: `${info.exprPrefix}${chain.dotted.join('')}`,
+      }
     }
 
     // Pass 1: locals aliasing a tracked chain. A `for…of` element variable is
@@ -291,15 +639,24 @@ function analyzeFile(path, root, state) {
     const collect = current => {
       if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)
         && current.initializer !== undefined && !tracked.has(current.name.text)) {
-        const info = resolve(current.initializer)
-        if (info !== null) tracked.set(current.name.text, info)
+        const varAnnotation = current.type === undefined ? null : current.type.getText(source)
+        if (varAnnotation === null || packagesOfAnnotation(varAnnotation).size > 0) {
+          const info = resolve(current.initializer)
+          if (info !== null) tracked.set(current.name.text, { ...info, exprPrefix: info.expr })
+        }
       }
       if (ts.isForOfStatement(current) && ts.isVariableDeclarationList(current.initializer)) {
         const declarations = current.initializer.declarations
         const declaration = declarations.length === 1 ? declarations[0] : undefined
         if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
           const info = resolve(optionalLeft(current.expression))
-          if (info !== null) tracked.set(declaration.name.text, { ...info, segments: elementOf(info.segments) })
+          if (info !== null) {
+            tracked.set(declaration.name.text, {
+              ...info,
+              segments: elementOf(info.segments),
+              exprPrefix: declaration.name.text,
+            })
+          }
         }
       }
       ts.forEachChild(current, collect)
@@ -358,8 +715,9 @@ function analyzeFile(path, root, state) {
           const negated = operator === ts.SyntaxKind.ExclamationEqualsToken
             || operator === ts.SyntaxKind.ExclamationEqualsEqualsToken
           for (const [access, literalNode] of [[unwrapped.left, unwrapped.right], [unwrapped.right, unwrapped.left]]) {
-            if (resolve(access) === null) continue
-            const expr = access.getText(source)
+            const resolved = resolve(access)
+            if (resolved === null) continue
+            const expr = resolved.expr
             if (ts.isIdentifier(literalNode) && literalNode.text === 'undefined') {
               return negated
                 ? { positive: [{ expr, kind: 'defined' }], negative: null }
@@ -376,8 +734,9 @@ function analyzeFile(path, root, state) {
       }
       // Truthiness of a tracked chain: `x` narrows optionals to defined and
       // `!x` (via the negation above) to falsy.
-      if (resolve(unwrapped) !== null) {
-        return { positive: [{ expr: unwrapped.getText(source), kind: 'defined' }], negative: [{ expr: unwrapped.getText(source), kind: 'falsy' }] }
+      const resolved = resolve(unwrapped)
+      if (resolved !== null) {
+        return { positive: [{ expr: resolved.expr, kind: 'defined' }], negative: [{ expr: resolved.expr, kind: 'falsy' }] }
       }
       return { positive: null, negative: null }
     }
@@ -393,6 +752,19 @@ function analyzeFile(path, root, state) {
           && terminates(statement.thenStatement) && terminates(statement.elseStatement)
       }
       return false
+    }
+
+    const recordDiscriminantHit = (target, literal, siteNode, scope) => {
+      const fieldPath = target.segments.join('.')
+      for (const key of target.keys) {
+        recordDiscriminant(key, fieldPath, literal)
+        // A bare-parameter comparison (`kind === 'tools'`) has no property
+        // access chain, so synthesize an empty-path site record to preserve
+        // rootType, guards, and source location for discriminant verification.
+        if (target.segments.length === 0) {
+          recordFieldPath(key, fieldPath, target.rootType, siteOf(siteNode), scope.guards, scope.loop)
+        }
+      }
     }
 
     const walk = (current, scope) => {
@@ -417,11 +789,9 @@ function analyzeFile(path, root, state) {
         const target = resolve(current.expression)
         for (const clause of current.caseBlock.clauses) {
           if (target !== null && ts.isCaseClause(clause) && ts.isStringLiteralLike(clause.expression)) {
-            for (const key of target.keys) {
-              recordDiscriminant(key, target.segments.join('.'), clause.expression.text)
-            }
+            recordDiscriminantHit(target, clause.expression.text, clause.expression, scope)
             const caseGuard = {
-              expr: current.expression.getText(source),
+              expr: target.expr,
               kind: 'eq',
               literal: clause.expression.text,
             }
@@ -439,11 +809,12 @@ function analyzeFile(path, root, state) {
         const declaration = declarations.length === 1 ? declarations[0] : undefined
         if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
           const origin = optionalLeft(current.expression)
-          if (resolve(origin) !== null) {
+          const originInfo = resolve(origin)
+          if (originInfo !== null) {
             // Element binding context: reads through the loop variable
             // record the iterated expression and the binding name.
             walk(current.statement,
-              { ...scope, loop: { binding: declaration.name.text, elementOf: origin.getText(source) } })
+              { ...scope, loop: { binding: declaration.name.text, elementOf: originInfo.expr } })
             return
           }
         }
@@ -453,11 +824,11 @@ function analyzeFile(path, root, state) {
       // event.type === 'x' / 'x' !== source.kind — a discriminant comparison.
       if (ts.isBinaryExpression(current) && EQUALITY.has(current.operatorToken.kind)) {
         for (const [left, right] of [[current.left, current.right], [current.right, current.left]]) {
-          const literal = unwrap(right)
+          const literal = unwrapValue(right)
           if (!ts.isStringLiteralLike(literal)) continue
           const target = resolve(left)
           if (target === null) continue
-          for (const key of target.keys) recordDiscriminant(key, target.segments.join('.'), literal.text)
+          recordDiscriminantHit(target, literal.text, current, scope)
         }
       }
       if (ts.isPropertyAccessExpression(current)) {
@@ -467,7 +838,8 @@ function analyzeFile(path, root, state) {
           const optional = []
           for (let link = current; ts.isPropertyAccessExpression(link); link = unwrap(link.expression)) {
             if (link.questionDotToken !== undefined) {
-              optional.push({ expr: link.expression.getText(source), kind: 'defined' })
+              const prefix = resolve(link.expression)
+              if (prefix !== null) optional.push({ expr: prefix.expr, kind: 'defined' })
             }
           }
           const guards = mergeGuards(scope.guards, optional)
@@ -498,6 +870,8 @@ function analyzeFile(path, root, state) {
   // A `ctx.on` callback is analyzed once, with its event name; visit() below
   // skips it so the same body is never read twice.
   const analyzed = new WeakSet()
+  const isFunctionNode = node => ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)
+    || ts.isArrowFunction(node) || ts.isFunctionExpression(node)
 
   const visit = node => {
     // Static imports.
@@ -506,8 +880,28 @@ function analyzeFile(path, root, state) {
       const specifier = node.moduleSpecifier.text
       const kind = importKindOf(node.importClause)
       recordImport(specifier, kind)
-      if (root === 'src') {
-        for (const name of importNamesOf(node.importClause)) localNames.set(name, specifier)
+      if (root === 'src' || root === 'tests') {
+        if (node.importClause !== undefined) {
+          if (node.importClause.name !== undefined) {
+            localNames.set(node.importClause.name.text, specifier)
+            localExportedNames.set(node.importClause.name.text, 'default')
+          }
+          if (node.importClause.namedBindings !== undefined) {
+            if (ts.isNamespaceImport(node.importClause.namedBindings)) {
+              localNames.set(node.importClause.namedBindings.name.text, specifier)
+              localExportedNames.set(node.importClause.namedBindings.name.text, '*')
+            } else {
+              for (const element of node.importClause.namedBindings.elements) {
+                const exported = (element.propertyName ?? element.name).text
+                localNames.set(element.name.text, specifier)
+                localExportedNames.set(element.name.text, exported)
+                if (specifier === '@deepseek-ai/cordis' && exported === 'Context') {
+                  contextTypeNames.add(element.name.text)
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -516,6 +910,20 @@ function analyzeFile(path, root, state) {
       && node.arguments.length >= 1 && ts.isStringLiteral(node.arguments[0])
       && node.arguments[0].text.startsWith(SCOPE)) {
       recordImport(node.arguments[0].text, 'value')
+    }
+
+    // Re-exports: export ... from '@deepseek-ai/…'.
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined
+      && ts.isStringLiteral(node.moduleSpecifier)
+      && node.moduleSpecifier.text.startsWith(SCOPE)) {
+      recordImport(node.moduleSpecifier.text, exportKindOf(node))
+    }
+
+    // Type-position import('@deepseek-ai/…').
+    if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+      && ts.isStringLiteral(node.argument.literal)
+      && node.argument.literal.text.startsWith(SCOPE)) {
+      recordImport(node.argument.literal.text, 'type')
     }
 
     // export const inject = ['a', 'b'] — the service surface the host must
@@ -536,7 +944,7 @@ function analyzeFile(path, root, state) {
 
     // ctx.on('<event>', (…) => …) — hooks; ctx.emit('<event>', …) — test-side synthesis.
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-      && isCtxBase(node.expression.expression)
+      && isCtxBase(node.expression.expression, ctxNames)
       && (node.expression.name.text === 'on' || node.expression.name.text === 'emit')
       && node.arguments.length >= 1 && ts.isStringLiteral(node.arguments[0])) {
       const via = node.expression.name.text
@@ -557,22 +965,47 @@ function analyzeFile(path, root, state) {
     }
 
     // ctx.<service> accesses (casts unwrapped, so `(ctx as …).mcpManager` counts).
-    if (ts.isPropertyAccessExpression(node) && isCtxBase(node.expression)) {
+    if (ts.isPropertyAccessExpression(node) && isCtxBase(node.expression, ctxNames)) {
       const bucket = state.ctxAccesses[node.name.text] ?? new Set()
       bucket.add(file)
       state.ctxAccesses[node.name.text] = bucket
     }
 
+    let savedCtxNames = null
+    if (isFunctionNode(node)) {
+      savedCtxNames = new Set(ctxNames)
+      for (const parameter of node.parameters) {
+        if (!ts.isIdentifier(parameter.name)) continue
+        const annotation = parameter.type === undefined ? null : parameter.type.getText(source)
+        if (isContextAnnotation(annotation)) ctxNames.add(parameter.name.text)
+        else if (parameter.type !== undefined) ctxNames.delete(parameter.name.text)
+      }
+    }
+
     // Field paths read on parameters annotated with imported DeepSeek types.
-    if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)
-      || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && node.body !== undefined
-      && !analyzed.has(node)) {
+    if (isFunctionNode(node) && node.body !== undefined && !analyzed.has(node)) {
       analyzeFunction(node, null)
     }
 
     ts.forEachChild(node, visit)
+
+    if (savedCtxNames !== null) {
+      ctxNames.clear()
+      for (const name of savedCtxNames) ctxNames.add(name)
+    }
   }
   visit(source)
+
+  // Extract L2b in-source module augmentations after imports are populated.
+  if (root === 'src') {
+    extractModuleAugmentations(source, localNames, localExportedNames, siteOf, (pkg, ifaceName, memberName, memberSpec) => {
+      const byIface = state.augmentations[pkg] ?? {}
+      const byMember = byIface[ifaceName] ?? {}
+      byMember[memberName] = memberSpec
+      byIface[ifaceName] = byMember
+      state.augmentations[pkg] = byIface
+    })
+  }
 }
 
 // --- implicit suspects (layer 2 forensics) --------------------------------------
@@ -613,13 +1046,6 @@ function isPrimitiveShape(text) {
 function isUntypedShape(text) {
   if (text === '') return false
   return UNTYPED_SHAPE.test(text.replace(/\s*\|\s*(?:undefined|null)/g, '').trim())
-}
-
-/** Strip only the wrappers that do not change the value's provenance. */
-function unwrapValue(node) {
-  let cursor = node
-  while (ts.isParenthesizedExpression(cursor) || ts.isNonNullExpression(cursor)) cursor = cursor.expression
-  return cursor
 }
 
 /** `a['b'].c` / `a?.b['c']` → `a.b.c`; falls back to the source text. */
@@ -687,15 +1113,76 @@ function scanFileForSuspects(file, source) {
     return entries
   }
 
+  // Local names imported from the host: a WeakMap keyed by one of these bets on
+  // the identity of an object the plugin does not own.
+  const localNames = new Map()
+  const upstreamNames = new Set()
+  const contextTypeNames = new Set()
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    if (!statement.moduleSpecifier.text.startsWith(SCOPE)) continue
+    const specifier = statement.moduleSpecifier.text
+    for (const name of importNamesOf(statement.importClause)) {
+      upstreamNames.add(name)
+      localNames.set(name, specifier)
+    }
+    if (specifier === '@deepseek-ai/cordis' && statement.importClause?.namedBindings !== undefined
+      && ts.isNamedImports(statement.importClause.namedBindings)) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        if ((element.propertyName ?? element.name).text === 'Context') contextTypeNames.add(element.name.text)
+      }
+    }
+  }
+
+  const hasUpstreamType = annotation => {
+    if (annotation === '') return false
+    for (const name of upstreamNames) {
+      if (new RegExp(`\\b${name}\\b`).test(annotation)) return true
+    }
+    return /import\(\s*['"]@deepseek-ai\//.test(annotation)
+  }
+
+  const bindingInScope = (scope, identifier) => {
+    let cursor = scope
+    while (cursor !== null) {
+      const entry = cursor.bindings.get(identifier.text)
+      if (entry !== undefined) return entry
+      cursor = cursor.parent
+    }
+    return undefined
+  }
+
+  const hookCallbacks = new Set()
+  const trackedEntry = new Map()
+  const widenedEntry = new Map()
+  const trackedVarEntries = []
   const catchBindings = new Set() // `catch (e)` declarations, bound by the clause below
   const structure = (node, scope) => {
     let inner = scope
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'on' && node.arguments.length >= 2
+      && ts.isStringLiteral(node.arguments[0])) {
+      const callback = node.arguments[1]
+      const calleeBase = unwrap(node.expression.expression)
+      const isCtxCallee = (ts.isIdentifier(calleeBase)
+        && (calleeBase.text === 'ctx' || bindingInScope(scope, calleeBase)?.isContext === true))
+        || (ts.isPropertyAccessExpression(calleeBase) && calleeBase.name.text === 'ctx')
+      if (isCtxCallee && callback !== undefined
+        && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+        hookCallbacks.add(callback)
+      }
+    }
     if (ts.isFunctionLike(node)) {
       inner = newScope(scope)
+      const isHookCallback = hookCallbacks.has(node)
       for (const parameter of node.parameters) {
         const annotation = typeTextOf(parameter.type, source)
-        for (const entry of bind(inner, parameter.name, { from: 'parameter' })) {
-          untypedEntry.set(entry, isUntypedShape(annotation))
+        const isContext = isContextTypeText(annotation === '' ? null : annotation, contextTypeNames, localNames)
+        const isUntyped = isUntypedShape(annotation)
+        const isTracked = !isContext && (hasUpstreamType(annotation) || (isHookCallback && !isUntyped))
+        for (const entry of bind(inner, parameter.name, { from: 'parameter', isContext })) {
+          untypedEntry.set(entry, isUntyped)
+          trackedEntry.set(entry, isTracked)
         }
       }
     } else if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
@@ -709,9 +1196,11 @@ function scanFileForSuspects(file, source) {
       inner = newScope(scope)
     }
     if (ts.isVariableDeclaration(node) && !catchBindings.has(node)) {
+      const varAnnotation = typeTextOf(node.type, source)
       for (const entry of bind(inner, node.name, { from: 'variable' })) {
         untypedEntry.set(entry, false)
         variableEntries.push({ entry, initializer: node.initializer })
+        trackedVarEntries.push({ entry, initializer: node.initializer, varAnnotation })
       }
     }
     scopeAt.set(node, inner)
@@ -719,14 +1208,43 @@ function scanFileForSuspects(file, source) {
   }
   structure(source, rootScope)
 
-  const bindingOf = identifier => {
-    let scope = scopeAt.get(identifier) ?? rootScope
-    while (scope !== null) {
-      const entry = scope.bindings.get(identifier.text)
-      if (entry !== undefined) return entry
-      scope = scope.parent
+  const bindingOf = identifier => bindingInScope(scopeAt.get(identifier) ?? rootScope, identifier)
+
+  const trackedValue = node => {
+    const cursor = unwrapValue(node)
+    if (ts.isIdentifier(cursor)) {
+      const entry = bindingOf(cursor)
+      return entry !== undefined && trackedEntry.get(entry) === true
     }
-    return undefined
+    if (ts.isPropertyAccessExpression(cursor) || ts.isElementAccessExpression(cursor)) {
+      return trackedValue(cursor.expression)
+    }
+    return false
+  }
+
+  // Monotone closure for L0 tracked & widened upstream bindings (H4' Port C routing).
+  for (;;) {
+    let changed = false
+    for (const { entry, initializer, varAnnotation } of trackedVarEntries) {
+      if (initializer === undefined || !trackedValue(initializer)) continue
+      if (varAnnotation === '' || hasUpstreamType(varAnnotation)) {
+        if (trackedEntry.get(entry) !== true) {
+          trackedEntry.set(entry, true)
+          changed = true
+        }
+      } else if (!isUntypedShape(varAnnotation) && isPrimitiveShape(varAnnotation)) {
+        if (widenedEntry.get(entry) !== true) {
+          widenedEntry.set(entry, true)
+          changed = true
+        }
+      } else if (isUntypedShape(varAnnotation)) {
+        if (untypedEntry.get(entry) !== true) {
+          untypedEntry.set(entry, true)
+          changed = true
+        }
+      }
+    }
+    if (!changed) break
   }
 
   const untypedValue = node => {
@@ -746,10 +1264,16 @@ function scanFileForSuspects(file, source) {
       if (UNTYPED_FACTORY.test(name)) return true
       return ts.isIdentifier(callee) && untypedValue(callee)
     }
-    if (ts.isAsExpression(cursor) || ts.isSatisfiesExpression(cursor)) {
+    if (ts.isAsExpression(cursor) || ts.isTypeAssertionExpression(cursor) || ts.isSatisfiesExpression(cursor)) {
+      const castType = typeTextOf(cursor.type, source)
+      if ((ts.isAsExpression(cursor) || ts.isTypeAssertionExpression(cursor))
+        && !hasUpstreamType(castType) && !isPrimitiveShape(castType)
+        && trackedValue(unwrap(cursor.expression))) {
+        return true
+      }
       // `(x as string)` / `(x as unknown[])` assert a primitive or array shape,
       // never a field name: the record read underneath is already reported.
-      return isPrimitiveShape(typeTextOf(cursor.type, source)) ? false : untypedValue(cursor.expression)
+      return isPrimitiveShape(castType) ? false : untypedValue(cursor.expression)
     }
     if (ts.isAwaitExpression(cursor)) return untypedValue(cursor.expression)
     if (ts.isConditionalExpression(cursor)) {
@@ -764,7 +1288,7 @@ function scanFileForSuspects(file, source) {
   }
 
   // Monotone closure: a binding only ever becomes untyped, so this terminates.
-  for (let round = 0; round < 24; round += 1) {
+  for (;;) {
     let changed = false
     for (const { entry, initializer } of variableEntries) {
       if (initializer === undefined || untypedEntry.get(entry) === true) continue
@@ -776,16 +1300,14 @@ function scanFileForSuspects(file, source) {
     if (!changed) break
   }
 
-  // Local names imported from the host: a WeakMap keyed by one of these bets on
-  // the identity of an object the plugin does not own.
-  const upstreamNames = new Set()
-  for (const statement of source.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
-    if (!statement.moduleSpecifier.text.startsWith(SCOPE)) continue
-    for (const name of importNamesOf(statement.importClause)) upstreamNames.add(name)
-  }
-
   // --- reporting pass -----------------------------------------------------------
+
+  const isWidenedIdentifier = node => {
+    const cursor = unwrapValue(node)
+    if (!ts.isIdentifier(cursor)) return false
+    const entry = bindingOf(cursor)
+    return entry !== undefined && widenedEntry.get(entry) === true
+  }
 
   const visit = node => {
     // Suspect 1a: a field read on a value with no field contract.
@@ -797,10 +1319,30 @@ function scanFileForSuspects(file, source) {
       && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
       add('untyped-field', node, accessPathOf(node, source))
     }
-    // Suspect 1b: `x as { field: Type }` invents a shape for an untyped value.
-    if (ts.isAsExpression(node) && node.type !== undefined
-      && node.type.getText(source).trim().startsWith('{') && untypedValue(node.expression)) {
+    // Suspect 1b: `x as { field: Type }` invents a shape for an untyped or cast-tracked value.
+    if ((ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) && node.type !== undefined
+      && node.type.getText(source).trim().startsWith('{')
+      && (untypedValue(node.expression)
+        || (!hasUpstreamType(typeTextOf(node.type, source)) && trackedValue(unwrap(node.expression))))) {
       add('untyped-field', node, `as ${flatten(node.type.getText(source), 100)}`)
+    }
+    // Suspect 1c: string literal discriminant comparison against a widened variable (`const t: string = event.type`).
+    if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
+      for (const [left, right] of [[node.left, node.right], [node.right, node.left]]) {
+        const literal = unwrapValue(right)
+        if (!ts.isStringLiteralLike(literal) || !isWidenedIdentifier(left)) continue
+        add('untyped-field', node, flatten(node.getText(source), 100))
+      }
+    }
+    if (ts.isSwitchStatement(node)) {
+      const expr = unwrapValue(node.expression)
+      if (isWidenedIdentifier(expr)) {
+        for (const clause of node.caseBlock.clauses) {
+          if (ts.isCaseClause(clause) && ts.isStringLiteralLike(clause.expression)) {
+            add('untyped-field', clause.expression, `${expr.text} === ${clause.expression.getText(source)}`)
+          }
+        }
+      }
     }
 
     // Suspect 2: a regex is a bet on the exact wording of an upstream string.
@@ -821,9 +1363,11 @@ function scanFileForSuspects(file, source) {
     // Suspect 4: a service reachable only through a cast, probed inside `try`.
     if (ts.isTryStatement(node)) {
       const scan = current => {
-        if (ts.isPropertyAccessExpression(current) && isCtxBase(current.expression)
-          && ts.isAsExpression(unwrapValue(current.expression))) {
-          add('try-cast-ctx', current, flatten(current.getText(source), 100))
+        if (ts.isPropertyAccessExpression(current) && ts.isAsExpression(unwrapValue(current.expression))) {
+          const base = unwrap(current.expression)
+          const isCtx = isCtxBase(current.expression)
+            || (ts.isIdentifier(base) && bindingOf(base)?.isContext === true)
+          if (isCtx) add('try-cast-ctx', current, flatten(current.getText(source), 100))
         }
         ts.forEachChild(current, scan)
       }
@@ -843,7 +1387,7 @@ function implicitSuspects() {
   for (const path of listSourceFiles(rootPath)) {
     const text = readFileSync(path, 'utf8')
     const source = ts.createSourceFile(path, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
-    suspects.push(...scanFileForSuspects(`src/${relative(rootPath, path)}`, source))
+    suspects.push(...scanFileForSuspects(`src/${relative(rootPath, path).replaceAll('\\', '/')}`, source))
   }
   const seen = new Set()
   return suspects
@@ -880,8 +1424,16 @@ function acknowledgementMatcher(raw) {
     }
   }
   const ranges = rest.split(',').map(part => {
-    const [from, to] = part.trim().split('-')
-    return [Number(from), Number(to ?? from)]
+    const pieces = part.trim().split('-')
+    if (pieces.length > 2) {
+      throw new Error(`invalid line range '${part}' in acknowledgement '${raw}'`)
+    }
+    const from = Number(pieces[0])
+    const to = Number(pieces[1] ?? pieces[0])
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
+      throw new Error(`invalid line range '${part}' in acknowledgement '${raw}'`)
+    }
+    return [from, to]
   })
   return {
     spec,
@@ -893,21 +1445,20 @@ function acknowledgementMatcher(raw) {
 
 async function loadRegistry() {
   if (!existsSync(REGISTRY_PATH)) {
-    return { seams: [], specifications: [], error: `missing ${relative(REPO_ROOT, REGISTRY_PATH)}` }
+    return { seams: [], specifications: [], error: `missing ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}` }
   }
-  let module
   try {
     // Node ≥ 22.18 / 24 strips the types in place; the file has no runtime deps.
-    module = await import(pathToFileURL(REGISTRY_PATH).href)
+    const module = await import(pathToFileURL(REGISTRY_PATH).href)
+    const seams = Array.isArray(module.IMPLICIT_SEAMS) ? module.IMPLICIT_SEAMS : []
+    const specifications = seams.flatMap(seam => [
+      ...(seam.acknowledged ?? []).map(raw => ({ seam: seam.id, effect: 'acknowledged', ...acknowledgementMatcher(raw) })),
+      ...(seam.ignored ?? []).map(raw => ({ seam: seam.id, effect: 'ignored', ...acknowledgementMatcher(raw) })),
+    ])
+    return { seams, specifications, error: null }
   } catch (error) {
-    return { seams: [], specifications: [], error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH)}: ${String(error)}` }
+    return { seams: [], specifications: [], error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}: ${String(error)}` }
   }
-  const seams = Array.isArray(module.IMPLICIT_SEAMS) ? module.IMPLICIT_SEAMS : []
-  const specifications = seams.flatMap(seam => [
-    ...(seam.acknowledged ?? []).map(raw => ({ seam: seam.id, effect: 'acknowledged', ...acknowledgementMatcher(raw) })),
-    ...(seam.ignored ?? []).map(raw => ({ seam: seam.id, effect: 'ignored', ...acknowledgementMatcher(raw) })),
-  ])
-  return { seams, specifications, error: null }
 }
 
 /**
@@ -965,7 +1516,10 @@ function suspectSection(suspects, registry) {
 
 // --- orchestration --------------------------------------------------------------
 
-const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const manifestPath = join(REPO_ROOT, 'package.json')
+const manifest = existsSync(manifestPath)
+  ? JSON.parse(readFileSync(manifestPath, 'utf8'))
+  : {}
 const state = {
   packages: {},
   injectedServices: new Set(),
@@ -974,6 +1528,7 @@ const state = {
   ctxAccesses: {},
   fieldPaths: {},
   discriminants: {},
+  augmentations: {},
 }
 
 for (const root of ROOTS) {
@@ -981,6 +1536,138 @@ for (const root of ROOTS) {
   if (existsSync(rootPath)) {
     for (const path of listSourceFiles(rootPath)) analyzeFile(path, root, state)
   }
+}
+
+function unwrapExportTarget(entry) {
+  let cursor = entry
+  for (let depth = 0; depth < 6 && cursor !== null && typeof cursor === 'object'; depth += 1) {
+    cursor = cursor.types ?? cursor.import ?? cursor.default ?? null
+  }
+  return typeof cursor === 'string' ? cursor : null
+}
+
+function resolveDtsCandidate(basePath) {
+  if (/\.(?:d\.ts|d\.mts|d\.cts)$/.test(basePath) && existsSync(basePath)) return basePath
+  const replaced = basePath.replace(/\.(?:tsx?|mts|cts|jsx?|mjs|cjs)$/, '')
+  for (const ext of ['.d.ts', '.d.mts', '.d.cts']) {
+    if (existsSync(`${replaced}${ext}`)) return `${replaced}${ext}`
+  }
+  for (const ext of ['index.d.ts', 'index.d.mts', 'index.d.cts']) {
+    const indexPath = join(basePath, ext)
+    if (existsSync(indexPath)) return indexPath
+  }
+  return null
+}
+
+function resolvePackageDtsEntry(specifier) {
+  const parts = specifier.split('/')
+  if (parts.length < 2) return null
+  const pkgName = `${parts[0]}/${parts[1]}`
+  const subpath = parts.length > 2 ? `./${parts.slice(2).join('/')}` : '.'
+  const pkgDir = join(REPO_ROOT, 'node_modules', parts[0], parts[1])
+  const pkgJsonPath = join(pkgDir, 'package.json')
+  if (!existsSync(pkgJsonPath)) return null
+  try {
+    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf8'))
+    const exported = pkgJson.exports?.[subpath]
+    const target = exported !== undefined
+      ? unwrapExportTarget(exported)
+      : (subpath === '.' ? (pkgJson.types ?? pkgJson.typings ?? 'index.d.ts') : subpath)
+    if (target === null) return null
+    const file = resolveDtsCandidate(resolve(pkgDir, target))
+    return file === null ? null : { file, pkg: pkgName }
+  } catch {
+    return null
+  }
+}
+
+function collectContextMembersFromDecl(decl, members) {
+  for (const member of decl.members) {
+    if (ts.isConstructorDeclaration(member)) continue
+    if (member.modifiers?.some(m => m.kind === ts.SyntaxKind.StaticKeyword)) continue
+    const nameNode = member.name
+    if (nameNode !== undefined && (ts.isIdentifier(nameNode) || ts.isStringLiteralLike(nameNode)
+      || ts.isNumericLiteral(nameNode))) {
+      members.add(nameNode.text)
+    }
+  }
+}
+
+function collectAnchoredContextMembers() {
+  const members = new Set(CORDIS_BUILTIN_CONTEXT_MEMBERS)
+  for (const memberName of Object.keys(state.augmentations['@deepseek-ai/cordis']?.Context ?? {})) {
+    members.add(memberName)
+  }
+
+  const scanDts = (filePath, pkg, collectRefs) => {
+    const text = readFileSync(filePath, 'utf8')
+    const source = ts.createSourceFile(filePath, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    const dir = dirname(filePath)
+    const refs = []
+    const visit = node => {
+      if (pkg === '@deepseek-ai/cordis'
+        && ((ts.isInterfaceDeclaration(node) && node.name.text === 'Context')
+          || (ts.isClassDeclaration(node) && node.name?.text === 'Context'))) {
+        collectContextMembersFromDecl(node, members)
+      }
+      if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)
+        && node.body !== undefined && ts.isModuleBlock(node.body)) {
+        const targetMod = node.name.text
+        if (targetMod === '@deepseek-ai/cordis' || (pkg === '@deepseek-ai/cordis' && targetMod.startsWith('.'))) {
+          for (const stmt of node.body.statements) {
+            if ((ts.isInterfaceDeclaration(stmt) && stmt.name.text === 'Context')
+              || (ts.isClassDeclaration(stmt) && stmt.name?.text === 'Context')) {
+              collectContextMembersFromDecl(stmt, members)
+            }
+          }
+        }
+      }
+      if (collectRefs) {
+        let spec
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) spec = node.moduleSpecifier.text
+        else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier)) {
+          spec = node.moduleSpecifier.text
+        } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+          && ts.isStringLiteral(node.argument.literal)) {
+          spec = node.argument.literal.text
+        }
+        if (spec !== undefined) {
+          if (spec.startsWith('.')) {
+            const relTarget = resolveDtsCandidate(resolve(dir, spec))
+            if (relTarget !== null) refs.push({ file: relTarget, pkg })
+          } else if (spec.startsWith(SCOPE)) {
+            const pkgTarget = resolvePackageDtsEntry(spec)
+            if (pkgTarget !== null) refs.push(pkgTarget)
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+    return refs
+  }
+
+  for (const ambientFile of listDtsFiles(REPO_ROOT)) {
+    scanDts(ambientFile, null, false)
+  }
+
+  if (existsSync(join(REPO_ROOT, 'node_modules/@deepseek-ai'))) {
+    const queue = []
+    const visited = new Set()
+    const seeds = new Set(['@deepseek-ai/cordis', ...Object.keys(state.packages)])
+    for (const pkg of seeds) {
+      const resolved = resolvePackageDtsEntry(pkg)
+      if (resolved !== null) queue.push(resolved)
+    }
+    while (queue.length > 0) {
+      const next = queue.shift()
+      const key = `${next.pkg ?? ''}:${next.file}`
+      if (visited.has(key)) continue
+      visited.add(key)
+      for (const ref of scanDts(next.file, next.pkg, true)) queue.push(ref)
+    }
+  }
+  return members
 }
 
 function declaredInFor(specifier) {
@@ -1054,7 +1741,20 @@ function canonical() {
     discriminants[key] = paths
   }
 
-  return {
+  const augmentations = {}
+  for (const pkg of Object.keys(state.augmentations).sort()) {
+    const ifaces = {}
+    for (const ifaceName of Object.keys(state.augmentations[pkg]).sort()) {
+      const members = {}
+      for (const memberName of Object.keys(state.augmentations[pkg][ifaceName]).sort()) {
+        members[memberName] = state.augmentations[pkg][ifaceName][memberName]
+      }
+      ifaces[ifaceName] = members
+    }
+    augmentations[pkg] = ifaces
+  }
+
+  const result = {
     packages,
     injectedServices: [...state.injectedServices].sort(),
     srcHooks: hookSet(state.srcHooks),
@@ -1066,6 +1766,13 @@ function canonical() {
     fieldPaths,
     discriminants,
   }
+  if (Object.keys(augmentations).length > 0) result.augmentations = augmentations
+  if (existsSync(join(REPO_ROOT, 'node_modules/@deepseek-ai'))) {
+    const anchoredMembers = collectAnchoredContextMembers()
+    const borrowed = Object.keys(state.ctxAccesses).sort().filter(svc => !anchoredMembers.has(svc))
+    if (borrowed.length > 0) result.borrowed = borrowed
+  }
+  return result
 }
 
 // --- report ----------------------------------------------------------------------
@@ -1102,8 +1809,8 @@ function report(data) {
   lines.push('')
   lines.push('| 事件 | via | 回调参数形状 | 位置 |')
   lines.push('|---|---|---|---|')
-  for (const hook of state.srcHooks) {
-    lines.push(`| ${hook.event} | ctx.${hook.via} | (${hook.params.join(', ')}) | ${hook.at} |`)
+  for (const hook of data.srcHooks) {
+    lines.push(`| ${hook.event} | ctx.${hook.via} | (${hook.params.join(', ')}) | ${hook.sites.join(', ')} |`)
   }
   lines.push('')
   lines.push('### ctx 服务访问')
@@ -1141,8 +1848,8 @@ function report(data) {
   lines.push('')
   lines.push('| 事件 | via | 参数形状 | 位置 |')
   lines.push('|---|---|---|---|')
-  for (const hook of state.testHooks) {
-    lines.push(`| ${hook.event} | ctx.${hook.via} | (${hook.params.join(', ')}) | ${hook.at} |`)
+  for (const hook of data.testHooks) {
+    lines.push(`| ${hook.event} | ctx.${hook.via} | (${hook.params.join(', ')}) | ${hook.sites.join(', ')} |`)
   }
   lines.push('')
   const testOnly = Object.entries(data.packages)
@@ -1191,7 +1898,8 @@ if (MODE === 'write') {
     console.error('coupling.json 缺失或不可读：先跑默认模式 review 草表，再 --write 生成并提交')
     process.exit(1)
   }
-  const drifted = Object.keys(data).filter(
+  const allSections = [...new Set([...Object.keys(data), ...Object.keys(committed)])]
+  const drifted = allSections.filter(
     section => JSON.stringify(committed[section]) !== JSON.stringify(data[section]),
   )
   if (drifted.length === 0) {
@@ -1223,6 +1931,8 @@ if (MODE === 'write') {
   }
 
   if (drifted.length > 0) process.exit(1)
+} else if (MODE === 'json') {
+  console.log(JSON.stringify(data, null, 2))
 } else {
   console.log(report(data))
   const suspects = implicitSuspects()

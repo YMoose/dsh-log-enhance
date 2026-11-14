@@ -262,5 +262,7 @@ test('verify-coupling names each exempted surface, not just a count (R4)', () =>
   const result = spawnSync(process.execPath, [VERIFY_SCRIPT, 'coupling.json'], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 })
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   assert.match(result.stdout, /exempt: @deepseek-ai\/dsh-tools::value\.messageId\b/, 'JsonValue exemptions must be named')
-  assert.match(result.stdout, /exempt: @deepseek-ai\/cordis::mcpManager\b/, 'ctx-service exemptions must be named')
+  // L0-L4 迁移：mcpManager（cast 触达的运行时注入服务）不再走豁免通道，
+  // 按借用面登记（borrowed: ['mcpManager']，H3'/H4' 语义）。
+  assert.match(result.stdout, /~ borrowed \(unsigned — add to inject, import provider, or exempt\): @deepseek-ai\/cordis::mcpManager\b/, 'borrowed runtime services must be named individually')
 })

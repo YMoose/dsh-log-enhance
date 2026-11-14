@@ -43,8 +43,8 @@ test('the baseline fingerprint ignores nested node_modules overrides', () => {
       timeout: 30_000,
       env: {
         ...process.env,
-        DSH_LOG_ENHANCE_HIDDEN_LOCK: hiddenLockPath,
-        DSH_LOG_ENHANCE_BASELINE_OUT: baselinePath,
+        DSH_SEAM_HIDDEN_LOCK: hiddenLockPath,
+        DSH_SEAM_BASELINE_OUT: baselinePath,
       },
     })
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)

@@ -348,7 +348,8 @@
   ],
   "ctxAccesses": {
     "agentLoop": [
-      "tests/integration/harness.test.ts"
+      "tests/integration/harness.test.ts",
+      "tests/integration/mcp-mount.test.ts"
     ],
     "effect": [
       "src/index.ts"
@@ -399,7 +400,7 @@
             "site": "src/index.ts:97",
             "guards": [
               {
-                "expr": "manager",
+                "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
             ]
@@ -417,7 +418,7 @@
             "site": "src/index.ts:98",
             "guards": [
               {
-                "expr": "manager",
+                "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
             ]
@@ -443,7 +444,7 @@
             "site": "src/index.ts:98",
             "guards": [
               {
-                "expr": "manager",
+                "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
             ]
@@ -483,7 +484,7 @@
             "site": "src/index.ts:89",
             "guards": [
               {
-                "expr": "manager",
+                "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
             ]
@@ -1371,7 +1372,7 @@
             "site": "src/index.ts:129",
             "guards": [
               {
-                "expr": "message.source.kind",
+                "expr": "payload.message.source.kind",
                 "kind": "eq",
                 "literal": "agent-message"
               }
@@ -1406,7 +1407,7 @@
             "site": "src/index.ts:132",
             "guards": [
               {
-                "expr": "message.source.kind",
+                "expr": "payload.message.source.kind",
                 "kind": "eq",
                 "literal": "agent-message"
               }
@@ -1441,7 +1442,7 @@
             "site": "src/index.ts:126",
             "guards": [
               {
-                "expr": "message.source.kind",
+                "expr": "payload.message.source.kind",
                 "kind": "eq",
                 "literal": "agent-message"
               }
@@ -1513,5 +1514,8 @@
         "agent-message"
       ]
     }
-  }
+  },
+  "borrowed": [
+    "mcpManager"
+  ]
 }

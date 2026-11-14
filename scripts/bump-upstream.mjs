@@ -1,69 +1,48 @@
 #!/usr/bin/env node
 /**
- * Resolve the dsh dependency train to the newest published version.
+ * 将 DSH 同版本依赖组更新到 registry 中最新的目标版本。
  *
- * The DSH-specific knowledge encoded here — the reasons a generic update
- * tool (Renovate/Dependabot) gets this wrong — is fourfold
- * (see docs/versioning.md §2/§7):
+ * 通用依赖更新工具（Renovate/Dependabot）无法直接处理以下 DSH 发布规则
+ * （详见 docs/versioning.md §2/§7）：
  *
- *  1. Follow the `next` dist-tag, never `latest`: most @deepseek-ai/*
- *     subpackages have their `latest` tag stranded at 0.0.1-rc.1; the
- *     current train travels on `next` (rc line).
- *  2. The dsh family is a single version train — every exact-version
- *     `@deepseek-ai/dsh-*` entry moves to the same target together.
- *  3. The cordis family (~4.x, plus cordis-plugin-loader 1.x) is a separate
- *     train and is never rewritten here; range specs are left untouched.
- *  4. Same-version rc republishes exist: `--check` compares the registry's
- *     publish timestamp (`time`) of the train version against
- *     baseline.json's generatedAt, catching a republish that no version
- *     comparison can see.
+ *  1. 跟随 `next` 标签而不是 `latest`：多数 @deepseek-ai/* 子包的
+ *     `latest` 仍停在 0.0.1-rc.1，当前预发布版本通过 `next` 发布。
+ *  2. DSH 系列包使用同一版本：所有精确版本的 `@deepseek-ai/dsh-*`
+ *     依赖必须一起更新到相同目标版本。
+ *  3. cordis 系列（约 4.x，以及 cordis-plugin-loader 1.x）单独管理，
+ *     本脚本不修改；使用版本范围的依赖也不修改。
+ *  4. 同一个 rc 版本号可能重新发布：`--check` 比较 registry 中该版本的
+ *     发布时间与 baseline.json 的 generatedAt，发现仅比较版本号无法识别的变化。
  *
- * Modes:
- *   --check       probe only. Prints `UPSTREAM_CHANGED=yes|no` plus a
- *                 reason and the advisory `alpha` tag; always exits 0 so
- *                 the tripwire workflow can parse the verdict (a registry
- *                 or baseline fetch failure exits 1 — loud, never a
- *                 silent "no").
- *   --print-only  resolve and print the plan; package.json untouched.
- *   --keep-floor  (write/--print-only only) move the train but KEEP
- *                 engines.dsh exactly as declared — the future
- *                 range/matrix escape hatch (docs/versioning.md §4).
- *                 BEFORE anything is written, the existing range must
- *                 still admit the target: floor <= target < upper with
- *                 the same prerelease/`-0` wall semantics
- *                 scripts/check-compat.mjs probes through the official
- *                 gate (this file uses its own compareVersions — a
- *                 second @deepseek-ai/dsh-app-boot import site would
- *                 drift the coupling inventory's file list). A target
- *                 the range rejects — e.g. past the upper wall — is a
- *                 REFUSAL: moving the wall is a conscious decision, not
- *                 a side effect of a train bump.
- *   (default)     rewrite package.json in place (2-space indent): every
- *                 exact-version dsh-* entry moves to the target AND
- *                 engines.dsh moves with it — floor = the target, upper
- *                 bound = next minor with the `-0` prerelease wall. A
- *                 train move is ONE atomic change (single-line follow,
- *                 docs/versioning.md §4), so the canary's artifact
- *                 (package.json + lockfile + baseline.json) is a complete
- *                 revalidation commit with nothing left to edit by hand.
+ * 模式：
+ *   --check       只检查，不修改文件。输出 `UPSTREAM_CHANGED=yes|no`、原因和
+ *                 仅供参考的 `alpha` 标签。正常完成时退出 0，供工作流解析结果；
+ *                 registry 或 baseline 读取失败时退出 1，不误报为“没有变化”。
+ *   --print-only  输出升级计划，不修改 package.json。
+ *   --keep-floor  仅在写入或 --print-only 时使用：更新依赖版本，但保留
+ *                 engines.dsh 原文（docs/versioning.md §4）。写入前会检查现有
+ *                 范围是否仍接受目标版本，即下界 <= 目标 < 上界，并采用与
+ *                 scripts/check-compat.mjs 相同的预发布边界规则。本文件保留自己的
+ *                 compareVersions，避免新增 dsh-app-boot import 改变依赖清单。
+ *                 目标超出范围时拒绝更新；调整兼容范围必须单独明确决定。
+ *   默认模式      原地重写 package.json（两个空格缩进）：所有精确版本的 dsh-*
+ *                 依赖更新到目标版本，同时更新 engines.dsh。下界设为目标版本，
+ *                 上界设为下一小版本的 `-0` 预发布边界。一次完整升级应提交
+ *                 package.json、lockfile 和 baseline.json，并重新执行全部检查。
  *
- * The republish watch covers EVERY train member, not just the bellwether:
- * the one real incident so far (2026-11-09) was a subpackage republished
- * under the same version string, which a bellwether-only watch would miss.
- * `--check` compares each member's publish time at its pinned spec against
- * baseline.json's generatedAt; an unreadable baseline disarms that
- * detection and therefore fails loudly.
+ * 同版本重新发布检查覆盖依赖组中的每个包，而不只检查主包：2026-11-09 的
+ * 实际事件就是子包以原版本号重新发布，只检查主包会漏掉。`--check` 将每个包
+ * 当前版本的发布时间与 baseline.json 的 generatedAt 比较；baseline 无法读取时
+ * 直接失败，因为此时无法判断依赖内容是否发生变化。
  *
- * Testability: DSH_LOG_ENHANCE_MANIFEST / DSH_LOG_ENHANCE_BASELINE /
- * DSH_LOG_ENHANCE_REGISTRY redirect the manifest, baseline, and registry
- * base URL; the registry base also accepts `file://` for the offline
- * fixtures in tests/bump-upstream.test.ts.
+ * 测试重定向：DSH_SEAM_MANIFEST / DSH_SEAM_BASELINE / DSH_SEAM_REGISTRY
+ * （均兼容旧名 DSH_LOG_ENHANCE_*）分别指定 manifest、baseline 和 registry 地址；
+ * registry 也支持 file://，供 tests/bump-upstream.test.ts 使用离线夹具。
  *
- * Reusable in any dsh plugin repo: the train is discovered dynamically from
- * exact-version `@deepseek-ai/dsh-*` entries; nothing repo-specific lives
- * here except the bellwether package used to read the registry.
+ * 可复用于其他 DSH 插件仓库：依赖组从精确版本的 `@deepseek-ai/dsh-*` 条目
+ * 动态发现，只有读取 registry 时使用的 DSH 主包名是固定配置。
  *
- * @module dsh-log-enhance/scripts/bump-upstream
+ * @module dsh-seam/scripts/bump-upstream
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -72,10 +51,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const BELLWETHER = '@deepseek-ai/dsh'
 const TRAIN_PREFIX = '@deepseek-ai/dsh-'
-const REGISTRY_BASE = process.env.DSH_LOG_ENHANCE_REGISTRY ?? 'https://registry.npmjs.org'
+const REGISTRY_BASE = process.env.DSH_SEAM_REGISTRY
+  ?? process.env.DSH_LOG_ENHANCE_REGISTRY
+  ?? 'https://registry.npmjs.org'
 const FIELDS = ['dependencies', 'devDependencies', 'peerDependencies']
 // Exact versions, prerelease AND build metadata (`0.2.2-rc.3+build.7`):
-// a build-metadata spec is still a train pin, not a range to leave behind.
+// 带 build metadata 的精确版本仍属于同版本依赖组，不是需要跳过的版本范围。
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 
 const args = process.argv.slice(2)
@@ -92,10 +73,11 @@ if (KEEP_FLOOR && MODE === 'check') {
   process.exit(1)
 }
 
-// --- 1. Discover the installed train from package.json ---------------------
+// --- 1. 从 package.json 找出当前使用的同版本依赖组 -------------------------
 
-const manifestUrl = process.env.DSH_LOG_ENHANCE_MANIFEST
-  ? pathToFileURL(resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_MANIFEST))
+const manifestOverride = process.env.DSH_SEAM_MANIFEST ?? process.env.DSH_LOG_ENHANCE_MANIFEST
+const manifestUrl = manifestOverride
+  ? pathToFileURL(resolve(process.cwd(), manifestOverride))
   : new URL('../package.json', import.meta.url)
 const manifest = JSON.parse(readFileSync(manifestUrl, 'utf8'))
 
@@ -115,11 +97,12 @@ if (trainEntries.length === 0) {
   process.exit(1)
 }
 
+const stripBuild = version => version.replace(/\+[0-9A-Za-z.-]+$/, '')
 const counts = new Map()
 for (const entry of trainEntries) counts.set(entry.spec, (counts.get(entry.spec) ?? 0) + 1)
 const current = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
 
-// --- 2. Resolve the newest published train version from the registry -------
+// --- 2. 从 registry 解析同版本依赖组的最新发布版本 -------------------------
 
 async function fetchPackument(name) {
   // `file://` base: offline fixture registry for the regression tests
@@ -135,7 +118,10 @@ async function fetchPackument(name) {
   }
   const url = `${REGISTRY_BASE}/${name.replaceAll('/', '%2F')}`
   try {
-    const response = await fetch(url, { headers: { accept: 'application/json' } })
+    const response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    })
     if (!response.ok) throw new Error(`registry responded ${String(response.status)}`)
     return await response.json()
   } catch (error) {
@@ -158,18 +144,26 @@ if (target === undefined) {
 // --- 3. Verdict / plan / rewrite --------------------------------------------
 
 if (MODE === 'check') {
+  if (compareVersions(target, current) < 0) {
+    console.error(`REFUSED: registry next tag (${target}) is older than current train (${current})`)
+    process.exit(1)
+  }
+  const skewed = trainEntries.filter(entry => stripBuild(entry.spec) !== stripBuild(target))
   let changed = 'no'
   let reason = `train ${current} unchanged; last published ${String(times[target] ?? '?')}`
   if (target !== current) {
     changed = 'yes'
     reason = `train moved: ${current} -> ${target} (published ${String(times[target] ?? '?')})`
+  } else if (skewed.length > 0) {
+    changed = 'yes'
+    reason = `train skewed against ${target}: ${skewed.map(entry => `${entry.name}@${entry.spec}`).join(', ')}`
   } else {
-    // Same version strings: a republish refreshes the registry `time` entry,
-    // which the committed baseline's generatedAt anchors. EVERY train member
-    // is watched — the 2026-11-09 incident was a subpackage republish the
-    // bellwether alone would have missed.
-    const baselineUrl = process.env.DSH_LOG_ENHANCE_BASELINE
-      ? pathToFileURL(resolve(process.cwd(), process.env.DSH_LOG_ENHANCE_BASELINE))
+    // 版本号不变时，通过 registry 的发布时间与已提交 baseline 的 generatedAt
+    // 比较来发现重新发布。依赖组中的每个包都要检查；2026-11-09 的事件就是
+    // 子包重新发布，只检查 DSH 主包会漏掉。
+    const baselineOverride = process.env.DSH_SEAM_BASELINE ?? process.env.DSH_LOG_ENHANCE_BASELINE
+    const baselineUrl = baselineOverride
+      ? pathToFileURL(resolve(process.cwd(), baselineOverride))
       : new URL('../baseline.json', import.meta.url)
     let anchored
     try {
@@ -188,9 +182,15 @@ if (MODE === 'check') {
       const spec = name === BELLWETHER ? current : trainEntries.find(entry => entry.name === name)?.spec
       if (spec === undefined) return null
       const packument = name === BELLWETHER ? bellwether : await fetchPackument(name)
-      const publishedAt = (packument['time'] ?? {})[spec]
+      const strippedSpec = spec.replace(/\+[0-9A-Za-z.-]+$/, '')
+      const timeMap = packument['time'] ?? {}
+      const publishedAt = timeMap[spec] ?? timeMap[strippedSpec]
       const published = Date.parse(publishedAt ?? '')
-      return Number.isFinite(published) && published > anchored
+      if (!Number.isFinite(published)) {
+        console.error(`registry packument for ${name} has no parseable publish time for ${spec}; republish detection cannot verify`)
+        process.exit(1)
+      }
+      return published > anchored
         ? `${name}@${spec} (published ${String(publishedAt)})`
         : null
     }))
@@ -228,7 +228,7 @@ if (KEEP_FLOOR) {
   }
   if (moves.length > 0) {
     // floor <= target < upper with full semver precedence (build metadata
-    // ignored) and the same `-0` wall semantics scripts/check-compat.mjs's
+    // ignored), using the same `-0` prerelease boundary semantics as
     // boundary probes enforce — but decided HERE by this file's
     // compareVersions, not by the official gate (a second
     // @deepseek-ai/dsh-app-boot import site would drift the coupling
@@ -247,8 +247,14 @@ if (KEEP_FLOOR) {
     }
   }
   console.log(`  engines.dsh: ${range} (kept; train ${target} admitted)`)
-} else if (moves.length > 0 && manifest.engines?.dsh !== enginesRange) {
-  console.log(`  engines.dsh: ${String(manifest.engines?.dsh ?? '(unset)')} -> ${enginesRange}`)
+} else {
+  if (compareVersions(target, current) < 0) {
+    console.error(`REFUSED: target ${target} downgrades the current train ${current} (monotonicity check failed)`)
+    process.exit(1)
+  }
+  if (moves.length > 0 && manifest.engines?.dsh !== enginesRange) {
+    console.log(`  engines.dsh: ${String(manifest.engines?.dsh ?? '(unset)')} -> ${enginesRange}`)
+  }
 }
 if (otherDeepseek.length > 0) {
   console.log('left untouched (separate trains / ranges):')
@@ -261,13 +267,13 @@ if (moves.length === 0) {
 if (MODE === 'write') {
   for (const move of moves) manifest[move.field][move.name] = target
   if (KEEP_FLOOR) {
-    // Range follow (docs/versioning.md §4 escape hatch): the train moves
-    // inside the declared interval; engines.dsh keeps guarding the wall.
+    // 版本范围模式（docs/versioning.md §4）：只更新依赖版本，
+    // engines.dsh 保持原有兼容范围不变。
     console.log(`package.json rewritten (train -> ${target}; engines.dsh kept); next: npm install && node scripts/write-baseline.mjs && npm run check`)
   } else {
-    // Single-line follow (docs/versioning.md §4): engines.dsh moves WITH the
-    // train — floor = the new train, upper bound = next minor with the `-0`
-    // prerelease wall. This is what makes the canary's artifact complete.
+    // 固定同一版本模式（docs/versioning.md §4）：依赖版本和 engines.dsh
+    // 一起更新。下界设为新版本，上界设为下一小版本的 `-0` 预发布边界，
+    // 使升级后的安装和验证可以使用同一组完整产物。
     manifest.engines ??= {}
     manifest.engines.dsh = enginesRange
     console.log(`package.json rewritten (train + engines.dsh -> ${enginesRange}); next: rm package-lock.json && npm install && node scripts/write-baseline.mjs && npm run check`)
