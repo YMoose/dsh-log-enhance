@@ -219,20 +219,21 @@ if (core === null) {
 }
 const enginesRange = `>=${floor} <${core[1]}.${Number(core[2]) + 1}.0-0`
 if (KEEP_FLOOR) {
-  // The floor stays put, so the EXISTING range must still admit the target.
-  // The official gate decides (same ruling as scripts/check-compat.mjs's
-  // boundary probes — prerelease ordering and the `-0` wall included); this
-  // script never reimplements semver.
+  // The floor stays put, so the EXISTING range must still admit the target;
+  // the admission check below decides that locally.
   const range = manifest.engines?.dsh
   if (typeof range !== 'string') {
     console.error('--keep-floor needs an existing engines.dsh range to keep')
     process.exit(1)
   }
   if (moves.length > 0) {
-    // The floor stays put, so the EXISTING range must still admit the target.
-    // floor <= target < upper with full prerelease semantics — the same
-    // bounds scripts/check-compat.mjs probes through the official gate;
-    // implemented with this file's compareVersions (see header note).
+    // floor <= target < upper with full semver precedence (build metadata
+    // ignored) and the same `-0` wall semantics scripts/check-compat.mjs's
+    // boundary probes enforce — but decided HERE by this file's
+    // compareVersions, not by the official gate (a second
+    // @deepseek-ai/dsh-app-boot import site would drift the coupling
+    // inventory's file list; see header note). The official gate remains
+    // the final backstop at S1 via `npm run check:compat`.
     const lower = /^\s*>=\s*(\S+)/.exec(range)?.[1]
     const upper = /<\s*(\S+)\s*$/.exec(range)?.[1]
     if (lower === undefined || upper === undefined) {
@@ -274,7 +275,9 @@ if (MODE === 'write') {
   writeFileSync(manifestUrl, `${JSON.stringify(manifest, null, 2)}\n`)
 }
 
-// --- minimal semver ordering (fallback path only) ---------------------------
+// --- minimal semver ordering (fallback resolution + --keep-floor admission) --
+// Build metadata parses but never participates in precedence; localeCompare
+// remains only for truly unparseable input.
 
 function compareVersions(a, b) {
   const left = parseVersion(a)
@@ -305,7 +308,11 @@ function compareVersions(a, b) {
 }
 
 function parseVersion(text) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(text)
+  // Build metadata (`+<build>`) is parsed but ignored, exactly as semver
+  // precedence demands — behavioral sync with tests/seam/engine.ts's
+  // compareVersions is pinned by the vector sets in tests/engine-contract
+  // .test.ts and tests/bump-upstream.test.ts.
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text)
   if (match === null) return undefined
   return {
     core: [Number(match[1]), Number(match[2]), Number(match[3])],

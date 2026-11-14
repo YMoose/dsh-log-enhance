@@ -474,7 +474,9 @@ export function derivedTypeImports(
 
 /**
  * 版本锁（single-line，默认）：`engines.dsh` 下界、devDependencies 的 dsh
- * 列车、baseline.json 的指纹列车必须是同一个版本，workflow 不得自带版本号。
+ * 列车、baseline.json 的指纹列车必须是同一个版本（modulo build metadata：
+ * 等式两边先剥 `+<build>` 再比——bump 写模式的产物 devDeps 钉完整版本而
+ * engines 下界剥后缀，见下面 stripBuild 注释），workflow 不得自带版本号。
  * range 模式（`versionLockstep: 'range'`）：列车只需落在 engines.dsh 区间
  * 内（下界 ≤ 列车 < 上界，含 `-0` 预发布墙语义——用下面的 compareVersions，
  * 与 scripts/bump-upstream.mjs 同一套算法；引擎不能 import
@@ -486,11 +488,14 @@ export function derivedTypeImports(
  */
 
 /** 极简 semver 排序：core 三元组 → 预发布标识符逐段（数字段 < 字母段，
- *  短的前缀相等则更小），无预发布 > 有预发布。与 bump-upstream.mjs 的
- *  compareVersions 语义一致；两边都不引入第三方 semver 依赖。 */
-function compareVersions(a: string, b: string): number {
+ *  短的前缀相等则更小），无预发布 > 有预发布；build metadata 解析但按
+ *  semver 先序规则忽略（`0.2.2-rc.4+build.1` ≡ `0.2.2-rc.4`）。与
+ *  bump-upstream.mjs 的 compareVersions 语义一致（tests/engine-contract
+ *  的向量集钉住两边同步）；两边都不引入第三方 semver 依赖。
+ *  导出仅供测试直接喂向量。 */
+export function compareVersions(a: string, b: string): number {
   const parse = (text: string): { readonly core: readonly number[], readonly pre: readonly string[] } | undefined => {
-    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(text)
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text)
     return match === null ? undefined : {
       core: [Number(match[1]), Number(match[2]), Number(match[3])],
       pre: match[4] === undefined ? [] : match[4].split('.'),
@@ -531,16 +536,21 @@ export async function probeVersionLockstep(context: TestContext, environment: Se
   }
   const range = manifest.engines?.dsh
   assert.ok(range !== undefined, 'package.json must declare engines.dsh')
+  // build metadata 不参与 semver 先序，也不参与 lockstep：bump 写模式对
+  // +build target 的产物是 devDeps 钉完整版本、engines 下界剥掉后缀
+  // （range 语法携带不了 build metadata）、baseline 指纹带完整串。每个
+  // 等式两边都先剥再比——不变量是「同一版本 modulo build metadata」。
+  const stripBuild = (version: string): string => version.replace(/\+[0-9A-Za-z.-]+$/, '')
   const floorOf = (): string => {
     const floor = /^>=\s*(\S+)/.exec(range)?.[1]
     assert.ok(floor !== undefined, `engines.dsh must open with >=<version>: ${range}`)
-    return floor
+    return stripBuild(floor)
   }
 
   const train = new Set(
     Object.entries(manifest.devDependencies ?? {})
       .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
-      .map(([, version]) => version),
+      .map(([, version]) => stripBuild(version)),
   )
   assert.equal(train.size, 1, `devDependencies must pin exactly one dsh train: ${[...train].join(', ')}`)
   const trainVersion = [...train][0] ?? ''
@@ -560,7 +570,7 @@ export async function probeVersionLockstep(context: TestContext, environment: Se
       `the train ${trainVersion} must stay below the -0 wall ${upper} (crossing the wall is a conscious decision)`,
     )
   } else {
-    assert.equal(trainVersion, floorOf(), 'engines.dsh floor and the devDependency train must agree')
+    assert.equal(trainVersion, floorOf(), 'engines.dsh floor and the devDependency train must agree (same version modulo build metadata)')
   }
 
   // Workflows carry no version of their own (both modes): the manifest and
@@ -574,13 +584,13 @@ export async function probeVersionLockstep(context: TestContext, environment: Se
 
   const baseline = JSON.parse(environment.readText('baseline.json')) as { packages: Record<string, { version: string }> }
   const fingerprinted = new Set(
-    Object.entries(baseline.packages).filter(([name]) => name.startsWith('dsh-')).map(([, pkg]) => pkg.version),
+    Object.entries(baseline.packages).filter(([name]) => name.startsWith('dsh-')).map(([, pkg]) => stripBuild(pkg.version)),
   )
   assert.equal(fingerprinted.size, 1, `baseline.json must fingerprint one dsh train: ${[...fingerprinted].join(', ')}`)
   if (environment.versionLockstep === 'range') {
-    assert.equal([...fingerprinted][0], trainVersion, 'baseline.json train must equal the devDependency train')
+    assert.equal([...fingerprinted][0], trainVersion, 'baseline.json train must equal the devDependency train (modulo build metadata)')
   } else {
-    assert.equal([...fingerprinted][0], floorOf(), 'baseline.json train must equal the engines.dsh floor')
+    assert.equal([...fingerprinted][0], floorOf(), 'baseline.json train must equal the engines.dsh floor (modulo build metadata)')
   }
 }
 

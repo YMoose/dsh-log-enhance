@@ -1017,7 +1017,7 @@ function canonical() {
   const hookSet = hooks => {
     const merged = new Map()
     for (const { event, via, params, at } of hooks) {
-      const key = `${event} ${via} ${JSON.stringify(params)}`
+      const key = `${event}\x00${via} ${JSON.stringify(params)}`
       if (!merged.has(key)) merged.set(key, { event, via, params, sites: new Set() })
       merged.get(key).sites.add(at)
     }

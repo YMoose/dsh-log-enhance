@@ -266,3 +266,105 @@ test('--keep-floor refuses a target the existing wall does not admit, writing no
     rmSync(registry.dir, { recursive: true, force: true })
   }
 })
+
+test('--keep-floor refuses a BELOW-FLOOR target carrying build metadata, writing nothing (R2)', () => {
+  // '0.2.9+build.1' sorts below the '>=0.2.10' floor by semver precedence; the
+  // old comparator's localeCompare fallback admitted it silently.
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bump-'))
+  const manifestPath = join(dir, 'package.json')
+  writeFileSync(manifestPath, `${JSON.stringify({
+    name: 'fixture-plugin',
+    version: '0.0.0',
+    engines: { dsh: '>=0.2.10 <0.3.0-0' },
+    devDependencies: { '@deepseek-ai/dsh-agent': '0.2.10' },
+  }, null, 2)}\n`)
+  const baselinePath = join(dir, 'baseline.json')
+  writeFileSync(baselinePath, `${JSON.stringify({ generatedAt: BASELINE_AT, packages: {} }, null, 2)}\n`)
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.9+build.1' },
+      time: { '0.2.10': RC3_PUBLISHED, '0.2.9+build.1': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.2.9+build.1': {} },
+    },
+  })
+  const at = { manifestPath, baselinePath, dir }
+  try {
+    const before = readFileSync(manifestPath, 'utf8')
+    const { status, stdout, stderr } = runScript(['--keep-floor'], at, registry.base)
+    assert.equal(status, 1, `a below-floor target must be refused even with build metadata:\n${stdout}\n${stderr}`)
+    assert.match(stderr, /does not admit the target 0\.2\.9\+build\.1/)
+    assert.equal(readFileSync(manifestPath, 'utf8'), before, 'a refusal writes NOTHING')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('fallback resolution orders build-metadata versions by semver precedence (R2)', () => {
+  // No dist-tags: the target falls back to the newest `versions` entry by
+  // compareVersions. 0.2.10 outranks 0.2.2-rc.4+build.1; the old comparator
+  // shunted the +build version into localeCompare and picked it instead.
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': {},
+      time: { '0.2.2-rc.4+build.1': '2026-11-14T00:00:00.000Z', '0.2.10': '2026-11-14T01:00:00.000Z' },
+      versions: { '0.2.2-rc.4+build.1': {}, '0.2.10': {} },
+    },
+  })
+  try {
+    const { status, stdout, stderr } = runScript([], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    assert.equal(readManifest(at).devDependencies['@deepseek-ai/dsh-agent'], '0.2.10')
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('write mode with a +build target pins the full version and strips the floor (R1 coverage pin)', () => {
+  // The exact artifact combo the lockstep probe must accept (see
+  // tests/engine-contract.test.ts): devDeps carry the full target (that is
+  // what installs), engines.dsh carries the stripped floor (semver ranges
+  // cannot carry build metadata).
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.4+build.1' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED, '0.2.2-rc.4+build.1': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.2.2-rc.4+build.1': {} },
+    },
+  })
+  try {
+    const { status, stdout, stderr } = runScript([], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    const manifest = readManifest(at)
+    assert.equal(manifest.devDependencies['@deepseek-ai/dsh-agent'], '0.2.2-rc.4+build.1')
+    assert.equal(manifest.devDependencies['@deepseek-ai/dsh-llm'], '0.2.2-rc.4+build.1')
+    assert.equal(manifest.engines.dsh, '>=0.2.2-rc.4 <0.3.0-0', 'the engines floor must be stripped')
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
+test('--keep-floor admits a target equal to the floor modulo build metadata (R2 vector)', () => {
+  const at = fixture()
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.3+build.7' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED, '0.2.2-rc.3+build.7': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.2.2-rc.3+build.7': {} },
+    },
+  })
+  try {
+    const { status, stdout, stderr } = runScript(['--keep-floor'], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    const manifest = readManifest(at)
+    assert.equal(manifest.devDependencies['@deepseek-ai/dsh-agent'], '0.2.2-rc.3+build.7')
+    assert.equal(manifest.engines.dsh, '>=0.2.2-rc.3 <0.3.0-0', 'same-precedence target keeps the floor')
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})

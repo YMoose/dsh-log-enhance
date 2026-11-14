@@ -22,10 +22,22 @@ for (const argument of files) {
   const exempt = (id, problems) => {
     const surface = id.replace(/^(?:field|discriminant):/, '')
     const separator = surface.lastIndexOf('::')
-    const firstSegment = (surface.slice(separator + 2).split('@')[0] ?? '').split('.')[0] ?? ''
-    return (ctxHosts.has(surface.slice(0, separator)) && services.has(firstSegment)
+    const bare = (surface.slice(separator + 2).split('@')[0] ?? '')
+    const firstSegment = bare.split('.')[0] ?? ''
+    const name = `${surface.slice(0, separator)}::${bare}`
+    if (ctxHosts.has(surface.slice(0, separator)) && services.has(firstSegment)
       && problems.every(problem => problem.startsWith('TS2339')))
-      || problems.every(problem => /^TS18047:/.test(problem) || /^TS2339:.*JsonValue/.test(problem))
+      return { name, reason: 'injected ctx service (TS2339)' }
+    // Opaque JsonValue reads are the ONLY tolerated TS18047s: the TS18047
+    // text ("'x' is possibly 'null'") never names the type, so a bare
+    // TS18047 is tolerated only when the SAME surface also carries
+    // TS2339-on-JsonValue evidence. A nullable read anywhere else — e.g. an
+    // upstream making a member `T | null` — must FAIL, not exempt.
+    const jsonEvidence = problem => /^TS2339:.*JsonValue/.test(problem)
+    if (problems.some(jsonEvidence)
+      && problems.every(problem => /^TS18047:/.test(problem) || jsonEvidence(problem)))
+      return { name, reason: 'opaque JsonValue read (TS18047/TS2339)' }
+    return undefined
   }
   const { outcome } = checkContract({
     root, coupling, fieldSpecs: specs.fieldSpecs, discriminantSpecs: specs.discriminantSpecs,
@@ -34,6 +46,7 @@ for (const argument of files) {
   })
   const verdict = { pass: 0, exempt: 0 }
   const report = []
+  const exempted = []
   for (const problem of outcome.unattributed) {
     // An import-line error means a rootType names a member the package does
     // not export; map it back to the surfaces whose rootType derived it.
@@ -45,14 +58,20 @@ for (const argument of files) {
   }
   for (const segment of outcome.segments) {
     if (segment.problems.length === 0) verdict.pass += 1
-    else if (exempt(segment.id, segment.problems)) verdict.exempt += 1
-    else report.push(`${segment.title}\n    ${segment.problems.join('\n    ')}`)
+    else {
+      const reason = exempt(segment.id, segment.problems)
+      if (reason !== undefined) {
+        verdict.exempt += 1
+        exempted.push(reason)
+      } else report.push(`${segment.title}\n    ${segment.problems.join('\n    ')}`)
+    }
   }
   for (const key of outcome.unprobed) report.push(`unprobed (no spec, no exemption): ${key}`)
   for (const key of outcome.stale) report.push(`stale (spec without a coupling record): ${key}`)
   for (const problem of outcome.mismatched) report.push(`root-type drift: ${problem}`)
   console.log(`${argument}: ${verdict.pass}/${outcome.segments.length} probes compile clean`
     + (verdict.exempt > 0 ? `, ${verdict.exempt} runtime-contract surface(s) exempt` : ''))
+  for (const entry of exempted) console.log(`  ~ exempt: ${entry.name} — ${entry.reason}`)
   for (const line of report) console.log(`  ✖ ${line}`)
   if (report.length > 0) failed = true
 }
