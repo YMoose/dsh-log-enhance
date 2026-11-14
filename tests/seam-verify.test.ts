@@ -54,6 +54,19 @@ const sectionFor = (pkg: string, path: string): string => {
 runSeamSuite({
   root: ROOT,
   coupling: COUPLING,
+  /**
+   * 库存下限哨兵：显式钉住在册库存（sync 复审 F1）。引擎默认值在泛化
+   * 改造（dsh-seam f0c9d80）中归零，本薄入口不传 floors 的话，下次
+   * sync 之后四条下限断言将静默变 `>= 0` 恒真。这里钉住当前 coupling.json
+   * 在册数量——扫描器若静默丢面（少于下限）即红；有意收缩库存时随
+   * coupling.json 一起显式下调。
+   */
+  inventoryFloors: {
+    srcHooks: 6,
+    testHooks: 3,
+    fieldPathPackages: 7,
+    discriminantPackages: 5,
+  },
   fieldSpecs: SPECS.fieldSpecs,
   discriminantSpecs: SPECS.discriminantSpecs,
   unverifiable: SPECS.unverifiable,
