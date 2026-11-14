@@ -1,20 +1,15 @@
 /**
- * 共享检查规则（2026-11-13 起只保留无法从插件源码推导的部分）：
+ * 共享检查机制（2026-11-14 起载荷只保留机制，内容由各消费仓注入）：
  *
- * - 字段和判别值检查曾经使用这里手工维护的类型收窄规则，但规则会与插件的
- *   真实用法不一致。例如 `sourceEventSeqs` 实际在 `tool/result` 分支读取，
- *   手工规则却按 `user/message` 检查。现在由 `tests/seam/engine.ts` 的
- *   `probeSpecsFromCoupling()` 根据 coupling.json 中的访问位置和类型收窄条件
- *   自动生成检查规则。
- * - 本文件保留三类无法自动推导的内容：
- *   1. `UNVERIFIABLE_LIBRARY`——无法仅靠类型系统验证的依赖项及原因；
- *   2. `IMPLICIT_FRAGMENT_LIBRARY`——按隐含依赖 id 组织的类型检查片段，
- *      其他仓库登记相同 id 后可以复用；
- *   3. `ABNORMAL_LIBRARY`——反向自检场景：使用 mock 上游声明并删除一个字段，
- *      确认生成的检查代码确实会编译失败。
- *
- * `standardSpecs(coupling, implicitSeams)` 只保留当前插件实际涉及的内容，
- * 并合并自动生成的 fieldSpecs / discriminantSpecs。
+ * - 字段和判别值检查规则由 `tests/seam/engine.ts` 的 `probeSpecsFromCoupling()`
+ *   按 coupling.json 中的访问位置和类型收窄条件自动生成。
+ * - 三类无法自动推导的内容——不可证豁免、隐性类型片段、反向自检场景——
+ *   按 L0–L4 模型属于**消费仓署名的事实**（豁免理由必须引用本仓登记的
+ *   `implicit/<id>`；片段按本仓的隐含依赖 id 键控），因此不内置在共享载荷
+ *   里：各仓维护在自己的非受管规格库文件中，经 `standardSpecs()` 的
+ *   `library` 参数注入。
+ * - 复用是消费仓之间的自主决定：一个仓可以引用另一个仓的库内容，但署名
+ *   与运行时证据绑定始终跟随导入方自己的登记。
  */
 
 import { probeSpecsFromCoupling } from './engine.js'
@@ -22,83 +17,20 @@ import type { Coupling, DiscriminantSpec, MockCheckoutScenario, ProbeSpec, TypeF
 import type { ImplicitSeam } from '../contracts/implicit-seams.js'
 
 /* ------------------------------------------------------------------ *
- * 库（不可推导的标准内容）
+ * 机制：消费仓注入的规格库 ∩ 本仓 coupling.json
  * ------------------------------------------------------------------ */
 
-/**
- * 类型系统证明不了的依赖项。不是"暂时没写"，而是**在这里明确写下为什么不可能**，
- * 并由隐性层检查代码补上运行时证据。（理由文本里提到的 implicit 检查代码 id 与测试
- * 路径属于登记方的语义，库只保证按上游表面求交集。）
- */
-const UNVERIFIABLE_LIBRARY: Readonly<Record<string, string>> = {
-  '@deepseek-ai/cordis::mcpManager': 'service 由 @deepseek-ai/dsh-mcp-manager 提供，不在依赖里、也没有 merge 进 Context，'
-    + '插件源码只能用 cast 读；运行时行为由 implicit/cordis-uninjected-mcp-throws 验证。',
-  '@deepseek-ai/cordis::mcpManager.register': '同上：register 的签名只能对着 dsh-mcp-manager 的源码核对，'
-    + '挂载路径由 implicit/cordis-uninjected-mcp-throws 与插件自身的集成测试覆盖。',
-  '@deepseek-ai/dsh-tools::value.messageId': 'value 是 JsonValue，读取走索引签名，删掉字段也不会编译失败；'
-    + '上游的 output schema 由 implicit/send-message-receipt-local 运行时验证。',
-  '@deepseek-ai/dsh-tools::value.messageId.length': '同上，字符串长度建立在 JsonValue 索引访问之后，类型上不可证；由 implicit/send-message-receipt-local 运行时验证。',
+/** 消费仓自有的规格库：三类无法自动推导的内容，由各仓维护在非受管文件。 */
+export interface SpecsLibrary {
+  /** 不可证豁免：表面键（`pkg::path`）→ 原因文本（引擎会解析其中的
+   *  `implicit/<id>` 并要求对应隐性契约在本仓登记且有运行时证据）。 */
+  readonly unverifiable?: Readonly<Record<string, string>>
+  /** 隐性类型片段：本仓隐含依赖 id → 检查片段。 */
+  readonly implicitFragments?: Readonly<Record<string, readonly TypeFragment[]>>
+  /** 反向自检场景（至多一个）：mock 上游声明并删除一个字段，确认生成的
+   *  检查代码确实会编译失败。 */
+  readonly abnormal?: MockCheckoutScenario | undefined
 }
-
-const IMPLICIT_FRAGMENT_LIBRARY: Readonly<Record<string, readonly TypeFragment[]>> = {
-  'subagent-settled-surface': [
-    {
-      parameter: "source: Extract<MessageSource, { kind: 'subagent-settled' }>",
-      body: [
-        'const _summary: string = source.summary',
-        'const _sender = source.senderSessionId',
-        'const _stop = source.stopReason',
-        'void _summary',
-        'void _sender',
-        'void _stop',
-      ],
-    },
-    {
-      parameter: "source: Extract<MessageSource, { kind: 'agent-message' }>",
-      body: [
-        "const _form: 'relay' = source.form",
-        'const _sender = source.senderSessionId',
-        'void _form',
-        'void _sender',
-      ],
-    },
-  ],
-}
-
-/** 异常场景（标准内容）：删掉 senderSessionId 后 mock checkout 必须编译失败。 */
-const ABNORMAL_LIBRARY: MockCheckoutScenario = {
-  title: '[abnormal] dropping senderSessionId from a mock checkout breaks the generated probe',
-  specKey: '@deepseek-ai/dsh-session::data.inserted[].source.senderSessionId',
-  packageName: '@deepseek-ai/dsh-session',
-  typesImportLine: "import type { SessionEvent } from '@deepseek-ai/dsh-session'",
-  mockTypes: `
-export interface AgentMessageSource {
-    kind: 'agent-message'
-    form: 'relay'
-    senderSessionId: string
-}
-export interface UserSource {
-    kind: 'user'
-}
-export type MessageSource = AgentMessageSource | UserSource
-export interface UserMessage {
-    id: string
-    content: readonly unknown[]
-    source: MessageSource
-}
-export type SessionEvent = {
-    type: 'agent/inbox/spliced'
-    seq: number
-    data: { inserted: UserMessage[] }
-}
-`,
-  droppedLine: '    senderSessionId: string',
-  expectedField: 'senderSessionId',
-}
-
-/* ------------------------------------------------------------------ *
- * 交集：库 ∩ 本仓 coupling.json + 自动生成的规格
- * ------------------------------------------------------------------ */
 
 export interface StandardSpecs {
   readonly fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>
@@ -114,27 +46,33 @@ const splitKey = (key: string): { readonly pkg: string, readonly path: string } 
 }
 
 /**
- * 标准库 ∩ 本仓耦合面：不可证豁免按 coupling.json 记录的上游表面求交，
+ * 注入库 ∩ 本仓耦合面：不可证豁免按 coupling.json 记录的上游表面求交，
  * 隐性类型片段按本仓登记的隐含依赖 id 求交；fieldSpecs /
  * discriminantSpecs 来自引擎的自动生成（类型收窄条件来自插件实际用法）。
+ * 不传 `library` 时结果不含任何注入内容——载荷不携带任何消费仓的事实。
  */
-export function standardSpecs(coupling: Coupling, implicitSeams: readonly ImplicitSeam[]): StandardSpecs {
+export function standardSpecs(
+  coupling: Coupling,
+  implicitSeams: readonly ImplicitSeam[],
+  library: SpecsLibrary = {},
+): StandardSpecs {
   const unverifiable = Object.fromEntries(
-    Object.entries(UNVERIFIABLE_LIBRARY).filter(([key]) => {
+    Object.entries(library.unverifiable ?? {}).filter(([key]) => {
       const { pkg, path } = splitKey(key)
       return coupling.fieldPaths[pkg]?.[path] !== undefined
     }),
   )
   const registeredSeams = new Set(implicitSeams.map(seam => seam.id))
   const implicitFragments = Object.fromEntries(
-    Object.entries(IMPLICIT_FRAGMENT_LIBRARY).filter(([id]) => registeredSeams.has(id)),
+    Object.entries(library.implicitFragments ?? {}).filter(([id]) => registeredSeams.has(id)),
   )
   const generated = probeSpecsFromCoupling(coupling)
+  const abnormal = library.abnormal
   return {
     fieldSpecs: generated.fieldSpecs,
     discriminantSpecs: generated.discriminantSpecs,
     unverifiable,
     implicitFragments,
-    ...(generated.fieldSpecs[ABNORMAL_LIBRARY.specKey] !== undefined ? { abnormal: ABNORMAL_LIBRARY } : {}),
+    ...(abnormal !== undefined && generated.fieldSpecs[abnormal.specKey] !== undefined ? { abnormal } : {}),
   }
 }

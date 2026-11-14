@@ -3,8 +3,11 @@
  *
  * - 引擎（`tests/seam/engine.ts`，闭环）：生成探路插件 → tsc 编译验货 →
  *   真实 `new Context()` 挂载验货，并发射全部测试。
- * - 标准规格库（`tests/seam/standard-specs.ts`）：按上游表面键控的探针规格，
- *   `standardSpecs()` 与本仓 coupling.json 求交集。
+ * - 规格机制与注入（`tests/seam/standard-specs.ts`，受管）：`standardSpecs()`
+ *   与本仓 coupling.json 求交集；载荷只保留机制，不携带任何消费仓事实。
+ * - 本仓规格库（`tests/seam/local-specs.ts`，非受管）：三类无法自动推导
+ *   的内容（不可证豁免 / 隐性类型片段 / 反向自检场景）——按 L0–L4 模型
+ *   属于本仓署名的事实，由上面的 `LOCAL_SPECS_LIBRARY` 注入。
  * - 本仓契约（本文件下方引入）：隐性契约登记 + 本仓探针与委派引用。
  *
  * 本仓没有标准库之外的自有规格，所以没有额外展开；有朝一日需要时，在
@@ -14,12 +17,13 @@
 
 import { findRepositoryRoot, loadCoupling, runSeamSuite, standardRuns } from './seam/engine.js'
 import { standardSpecs } from './seam/standard-specs.js'
+import { LOCAL_SPECS_LIBRARY } from './seam/local-specs.js'
 import { IMPLICIT_SEAMS } from './contracts/implicit-seams.js'
 import { IMPLICIT_DELEGATIONS, IMPLICIT_RUNS } from './contracts/seam-runs.js'
 
 const ROOT = findRepositoryRoot('dsh-log-enhance')
 const COUPLING = loadCoupling(ROOT)
-const SPECS = standardSpecs(COUPLING, IMPLICIT_SEAMS)
+const SPECS = standardSpecs(COUPLING, IMPLICIT_SEAMS, LOCAL_SPECS_LIBRARY)
 
 /** 引擎标准探针里，只有本仓登记过的隐性契约 id 才采纳。 */
 const REGISTERED_SEAM_IDS = new Set(IMPLICIT_SEAMS.map(seam => seam.id))

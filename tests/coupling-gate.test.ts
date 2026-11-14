@@ -11,12 +11,12 @@ import { fileURLToPath } from 'node:url'
  * Regression cover for the implicit-contract suspect gate
  * (`scripts/analyze-dsh-coupling.mjs --check`).
  *
- * Phase B of docs/seam-driven-verification.md shipped with
- * `217929e` (the seam verifier), which was the plan's stated trigger for
- * turning the suspect report into a hard gate (review P4). Before, an
- * unacknowledged suspect — or an unloadable seam registry — printed an
- * advisory line and exited 0, so nothing guaranteed a human ever saw the
- * report.
+ * Provenance: the gate shipped with `217929e` in the pilot repository
+ * (dsh-log-enhance, whose design docs named it Phase B) — that plan's stated
+ * trigger for turning the suspect report into a hard gate (review P4).
+ * Before, an unacknowledged suspect — or an unloadable seam registry —
+ * printed an advisory line and exited 0, so nothing guaranteed a human
+ * ever saw the report.
  *
  * Fixtures redirect the repo root through DSH_SEAM_ROOT: the script
  * scans `src/` under the fixture, gates against the fixture's coupling.json
@@ -146,7 +146,7 @@ async function loadEngine(): Promise<EngineApi> {
 }
 
 async function loadStandardSpecs(): Promise<{
-  standardSpecs(coupling: unknown, implicitSeams: unknown): {
+  standardSpecs(coupling: unknown, implicitSeams: unknown, library?: unknown): {
     fieldSpecs: Record<string, unknown>
     discriminantSpecs: Record<string, unknown>
     unverifiable: Record<string, string>
@@ -679,17 +679,101 @@ test('engine compareVersions vectors and standardSpecs intersection maintain con
     ctxAccesses: {},
     injectedServices: [],
     fieldPaths: {
-      '@deepseek-ai/dsh-tools': {
-        'value.messageId': {
+      '@deepseek-ai/dsh-fixture-tools': {
+        'opaque.reading': {
           rootType: 'JsonValue',
           accesses: [{ site: 'src/a.ts:1', guards: [] }],
         },
       },
-      '@deepseek-ai/dsh-session': {
-        'data.inserted[].source.senderSessionId': {
+      '@deepseek-ai/dsh-fixture-session': {
+        'data.inserted[].source.senderId': {
           rootType: 'SessionEvent',
           accesses: [{ site: 'src/a.ts:2', guards: [] }],
         },
+      },
+    },
+    discriminants: {},
+  }
+  const specs = standardSpecs(coupling, [
+    {
+      id: 'fixture-settled-surface',
+      description: 'test',
+      usedAt: 'src/a.ts:1',
+      auditSection: 'test',
+      probe: 'test',
+      acknowledged: [],
+    },
+  ], {
+    unverifiable: {
+      '@deepseek-ai/dsh-fixture-tools::opaque.reading': 'opaque JsonValue indexed read; runtime-evidenced by implicit/fixture-receipt.',
+    },
+    implicitFragments: {
+      'fixture-settled-surface': [
+        {
+          parameter: "source: Extract<MessageSource, { kind: 'fixture-settled' }>",
+          body: [
+            'const _summary: string = source.summary',
+            'void _summary',
+          ],
+        },
+      ],
+    },
+    abnormal: {
+      title: '[abnormal] dropping senderId from a mock checkout breaks the generated probe',
+      specKey: '@deepseek-ai/dsh-fixture-session::data.inserted[].source.senderId',
+      packageName: '@deepseek-ai/dsh-fixture-session',
+      typesImportLine: "import type { SessionEvent } from '@deepseek-ai/dsh-fixture-session'",
+      mockTypes: `
+export interface SettledSource {
+    kind: 'fixture-settled'
+    senderId: string
+}
+export type MessageSource = SettledSource
+export interface UserMessage {
+    id: string
+    content: readonly unknown[]
+    source: MessageSource
+}
+export type SessionEvent = {
+    type: 'agent/inbox/spliced'
+    seq: number
+    data: { inserted: UserMessage[] }
+}
+`,
+      droppedLine: '    senderId: string',
+      expectedField: 'senderId',
+    },
+  })
+  assert.ok('@deepseek-ai/dsh-fixture-tools::opaque.reading' in specs.unverifiable)
+  assert.ok('fixture-settled-surface' in specs.implicitFragments)
+  assert.ok(specs.abnormal !== undefined)
+  // Intersection is a filter, not a union: library keys the coupling does not
+  // record, and fragment ids the registry does not carry, stay out.
+  assert.ok(!('@deepseek-ai/dsh-fixture-tools::opaque.unrelated' in specs.unverifiable))
+})
+
+test('payload neutrality: standardSpecs injects no library content of its own', async () => {
+  const { standardSpecs } = await loadStandardSpecs()
+  // The exact surfaces and seam id the pilot-era built-in library shipped
+  // (standard-specs.ts before 2026-11-14). A coupling/registry that would
+  // have matched them ALL must still receive an empty injection — the shared
+  // payload carries consumer facts through the library parameter only.
+  const coupling = {
+    srcHooks: [],
+    testHooks: [],
+    ctxAccesses: {},
+    injectedServices: [],
+    fieldPaths: {
+      '@deepseek-ai/cordis': {
+        mcpManager: { rootType: 'Context', accesses: [{ site: 'src/a.ts:1', guards: [] }] },
+        'mcpManager.register': { rootType: 'Context', accesses: [{ site: 'src/a.ts:2', guards: [] }] },
+      },
+      '@deepseek-ai/dsh-tools': {
+        'value.messageId': { rootType: 'JsonValue', accesses: [{ site: 'src/a.ts:3', guards: [] }] },
+        'value.messageId.length': { rootType: 'JsonValue', accesses: [{ site: 'src/a.ts:4', guards: [] }] },
+      },
+      '@deepseek-ai/dsh-session': {
+        'data.inserted[].source.senderSessionId': { rootType: 'SessionEvent', accesses: [{ site: 'src/a.ts:5', guards: [] }] },
       },
     },
     discriminants: {},
@@ -704,9 +788,9 @@ test('engine compareVersions vectors and standardSpecs intersection maintain con
       acknowledged: [],
     },
   ])
-  assert.ok('@deepseek-ai/dsh-tools::value.messageId' in specs.unverifiable)
-  assert.ok('subagent-settled-surface' in specs.implicitFragments)
-  assert.ok(specs.abnormal !== undefined)
+  assert.deepEqual(specs.unverifiable, {}, 'no unverifiable exemption may ship from the payload itself')
+  assert.deepEqual(specs.implicitFragments, {}, 'no implicit fragment may ship from the payload itself')
+  assert.equal(specs.abnormal, undefined, 'no abnormal scenario may ship from the payload itself')
 })
 
 test('verify-coupling.mjs runs standalone without a repo coupling.json and reports missing exports (M6/M8)', () => {

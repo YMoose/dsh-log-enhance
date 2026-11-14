@@ -32,7 +32,7 @@ export interface ImplicitSeam {
   description: string
   /** 代码位置（`文件:行号`），只是索引，不参与匹配。 */
   usedAt: string
-  /** 对应的 `docs/upstream-audit.md` 章节（或其他文档章节）。 */
+  /** 对应的审计文档章节（章节命名与文档路径由各仓自定）。 */
   auditSection: string
   /** 验货方式；阶段 B 会把它实现成可执行探针。 */
   probe: string

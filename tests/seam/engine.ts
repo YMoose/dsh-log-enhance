@@ -16,7 +16,8 @@
  * 运行时检查：每条隐含依赖要么执行调用方提供的 `SeamRun`，要么关联到已有测试；
  * 对后者会检查对应测试标题是否仍然存在，避免关联失效后没有提示。
  *
- * 设计说明见 `docs/seam-driven-verification.md` 与 `docs/commit-3-design.md`。
+ * 设计说明见 dsh-seam 仓 `docs/origin.md`（决策谱系）；消费仓侧的落地
+ * 文档由各仓自持（试点 dsh-log-enhance 的历史设计文档随该仓保留）。
  */
 
 import { test } from 'node:test'
@@ -209,9 +210,9 @@ export interface SeamSuite {
    */
   readonly typeImports?: Readonly<Record<string, readonly string[]>> | undefined
   /**
-   * 审计章节映射（docs/upstream-audit.md）：标题里的 `-> Audit §N` 后缀由
-   * 调用方提供；缺省时标题不带章节后缀。钩子签名检查代码以 `hook:<event>` 为
-   * pkg、空 path 调用。
+   * 审计章节映射（章节命名与文档路径由各消费仓自定）：标题里的
+   * `-> Audit §N` 后缀由调用方提供；缺省时标题不带章节后缀。钩子签名
+   * 检查代码以 `hook:<event>` 为 pkg、空 path 调用。
    */
   readonly sectionFor?: ((pkg: string, path: string) => string) | undefined
   /**

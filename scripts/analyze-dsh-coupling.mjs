@@ -16,7 +16,7 @@
  *   - tests 中的 hook/emit 调用，以及仅由 tests/scripts 引入的包。
  *
  * 不自动提取文件格式和业务语义，例如存储布局、zstd 容器、文本协议和消息
- * 生命周期顺序。这些约束记录在 docs/upstream-audit.md 中，由人工维护。
+ * 生命周期顺序。这些约束由各消费仓人工维护在本仓的审计文档中（路径自定）。
  *
  * 对无法自动验证的隐含依赖，只报告可能相关的代码形状，例如无类型记录上的
  * 字段读取、日志文本正则、以上游对象为键的 WeakMap，以及在 try 中通过类型
@@ -1403,8 +1403,8 @@ function implicitSuspects() {
 // --- the manual seam registry ----------------------------------------------------
 
 /**
- * One acknowledgement, e.g. `src/mcp/analysis.ts:199`, `src/observer.ts:110-133`,
- * `src/mcp/session-store.ts:24,30`, `src/mcp/analysis.ts:/STARTED_SUBAGENT/`, or
+ * One acknowledgement, e.g. `src/plugin.ts:199`, `src/plugin.ts:110-133`,
+ * `src/store.ts:24,30`, `src/plugin.ts:/STARTED_SUBAGENT/`, or
  * a bare `src/foo.ts` for "everything in this file". An optional ` — reason`
  * suffix is for humans and is stripped before matching.
  */
@@ -1782,7 +1782,7 @@ function report(data) {
   lines.push('# DeepSeek 耦合面清单（机械层）')
   lines.push('')
   lines.push('由 `scripts/analyze-dsh-coupling.mjs` 生成：层 0（npm 面）、层 1（进程内契约）、层 3（验证契约）。')
-  lines.push('层 2（读盘格式与语义契约）无法从代码形状提取，由人维护在 `docs/upstream-audit.md`。')
+  lines.push('层 2（读盘格式与语义契约）无法从代码形状提取，由人维护在各消费仓自己的审计文档中（路径自定）。')
   lines.push('`--write` 固化到 `coupling.json`；`--check` 是漂移门禁（与 baseline.json 同语义：变化必须是有意识的决定）。')
   lines.push('')
 
