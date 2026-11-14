@@ -174,6 +174,18 @@
 
 ---
 
+## 契约工件与独立验货路径（2026-11-14）
+
+守卫自动提取之后再往前一步：一个 **coupling.json 就是自包含的消费者契约**。三处仓库硬编码从引擎移除，契约层因此可以脱离本仓独立运行：
+
+1. **探针 import 零硬编码**：生成的探路插件不再内置任何上游包名——具名 import 从 fieldPaths 的 rootType 机械推导（`baseTypeNames`：剥 `Readonly<…>`、按顶层 `|` 拆联合）；清单 `packages` 段里没有任何字段读取的包生成裸 `import type {}`（镜像插件自己的 import 环境，`@deepseek-ai/dsh-subagent` 的声明合并副作用由此生效）；suite 层 `typeImports` 补充清单看不见的名字（本仓只有 dsh-llm 的 `MessageSource`，隐性片段引用它）。
+2. **契约层可独立调用**：`runContractSuite` 只发射编译可证的测试——字段/判别/钩子签名探针、隐性类型片段、unprobed/stale 完整性、记录下限；挂载验货、隐性真跑、委派核对、版本锁留在全套件 `runSeamSuite`（它先调契约层，测试标题逐字不变）。`scripts/verify-coupling.mjs` 是契约层的 CLI 形态：对任意 coupling.json 用 `probeSpecsFromCoupling` 生成探针、对着**当前 node_modules** 编译、按文件出裁决（任何探针失败即 exit 1）。注入服务读取（`ctx.*` 的 TS2339）与 JsonValue 不透明读取是编译证不了的运行时契约——报告为豁免而非失败，归接入仓的隐性层管辖；import 行报错（rootType 指向不存在的导出）映射回具体路径。
+3. **版本锁有 range 模式**：`SeamSuite.versionLockstep: 'range'`（默认 `'single-line'` 断言不变）——列车只需落在 engines.dsh 区间内（下界 ≤ 列车 < 上界，含 `-0` 墙语义；引擎内置与 `bump-upstream.mjs` 同一套 semver 比较——引擎不能 import app-boot 去借官方 gate，那会把新包 import 记进 coupling.json 的 packages 清单），上界仍必须带 `-0` 墙；配套 `bump-upstream.mjs --keep-floor`：列车推进而 engines.dsh 不动，目标必须落在现有区间内（与 `check-compat.mjs` 官方 gate 相同的下界/`-0` 墙语义），越墙即**拒绝写入**（移动墙是有意识的决定）。
+
+打开的三扇未来之门：**ESLint 式版本矩阵**——对每个宿主版本各跑一次契约编译（verify-coupling.mjs 换个 node_modules 即可）；**上游吸收**——DSH CI 可以用 verify-coupling.mjs 验社区插件提交的 coupling.json，不用装插件源码；**区间模式**——上游进入稳定期后 `--keep-floor` + `versionLockstep: 'range'` 是现成的逃生口。本仓策略不变：single-line（[versioning.md](versioning.md) §4）。回归锚：`tests/engine-contract.test.ts`（未见过的 rootType 自动获得正确 import、CLI 真清单 exit 0 / 坏清单 exit 1 点名探针、range 绿而 single-line 红同一夹具）。
+
+---
+
 ## 能包住什么？包不住什么？
 
 ### ✅ 能被这套机制包住的部分（约 70%）

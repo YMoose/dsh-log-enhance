@@ -27,6 +27,30 @@ const STANDARD_RUNS_APPLICABLE = Object.fromEntries(
   Object.entries(standardRuns).filter(([id]) => REGISTERED_SEAM_IDS.has(id)),
 )
 
+/**
+ * 审计章节映射（docs/upstream-audit.md）——引擎不再内置。约定键：
+ * `hook:<event>` 是钩子签名探针，`event:<name>` 是事件载荷；其余按
+ * `pkg::path`。这个映射原样搬自引擎拆分前的 auditSection/hookSection，
+ * 保证标题逐字不变。
+ */
+const sectionFor = (pkg: string, path: string): string => {
+  if (pkg.startsWith('hook:')) return pkg.slice('hook:'.length).startsWith('agent/') ? '§3' : '§1'
+  if (pkg.startsWith('event:')) return '§3'
+  if (pkg === '@deepseek-ai/cordis') return path.startsWith('mcpManager') ? '§8' : '§1'
+  if (pkg === '@deepseek-ai/dsh-tools') return path.startsWith('value') ? '§2' : '§1'
+  if (pkg === '@deepseek-ai/dsh-agent') return '§3'
+  if (pkg === '@deepseek-ai/dsh-session') {
+    return path.startsWith('data.inserted')
+      || path.startsWith('data.source')
+      || path === 'data.id'
+      || path === 'surfaceOp'
+      || path === 'type'
+      ? '§3'
+      : '§1'
+  }
+  return '§1'
+}
+
 runSeamSuite({
   root: ROOT,
   coupling: COUPLING,
@@ -37,5 +61,16 @@ runSeamSuite({
   implicitSeams: IMPLICIT_SEAMS,
   implicitRuns: { ...STANDARD_RUNS_APPLICABLE, ...IMPLICIT_RUNS },
   implicitDelegations: IMPLICIT_DELEGATIONS,
+  sectionFor,
+  /**
+   * 探针 import 的 suite 层补充：隐性片段引用 dsh-llm 的 MessageSource
+   * （coupling.json 里 dsh-llm 没有字段读取，rootType 推导看不见它）。
+   * 其余 import 全部机械推导：rootType → 具名 import；packages 清单里
+   * 没有字段读取的包（如 dsh-subagent）→ 裸 import，声明合并副作用随之
+   * 生效（agent-message / subagent-settled 两个 source kind）。
+   */
+  typeImports: {
+    '@deepseek-ai/dsh-llm': ['MessageSource'],
+  },
   ...(SPECS.abnormal !== undefined ? { abnormal: SPECS.abnormal } : {}),
 })
