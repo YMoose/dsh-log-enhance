@@ -1,13 +1,13 @@
 {
   "source": {
     "repo": "https://github.com/YMoose/dsh-seam",
-    "ref": "603c7dc92a5e84239d1797f2a9979379232c0f8c"
+    "ref": "67731ad141cfd492739adf45afe99bbf216d29bc"
   },
   "files": {
     "scripts/analyze-dsh-coupling.mjs": "b6bae1449b25b0692066d9819426fcb6ef71925ed58513b66f4afaf14ae9c250",
     "scripts/bump-upstream.mjs": "76740481ad9d4dc10064aedb122c5e543254f6c39d346915ee87cc7aeea02c77",
     "scripts/check-compat.mjs": "12c02e4ed3b65a5853343484bf472e5ccbac32f4940c7bef0a2a01d5ba8babaf",
-    "scripts/verify-coupling.mjs": "4cfd75ec166f63fb6857a3e7e6fceb3275224448cba232a3be9380074179299d",
+    "scripts/verify-coupling.mjs": "53639a622f05616190299923eb8be52aac7bb02ec1b2232e23eca24f5a91f149",
     "scripts/write-baseline.mjs": "4b6d2a773061fad8f71f87a01510b00c38de5f2fa24961c647b61300d7307f56",
     "tests/baseline-fingerprint.test.ts": "1c73a5504f0f20f25f37640cbe458fb485269dd034b3bb67bc6411c60cd5ecdd",
     "tests/bump-upstream.test.ts": "b926040a15d659032915b43f1bbee18f6f570ead1e3d9c0f6ec30d2126ce8932",
@@ -18,6 +18,7 @@
     "tests/seam/standard-specs.ts": "6e27debb834650fbc96d4fcfea602155cd679d21ed6c431afd85c710965d2bfb",
     "tests/typescript-native-guard.test.ts": "2232d1def074bb61aba8da2669b37b8c8115264ba11e5fc0a9c16ca03dfc303a",
     "tests/verify-types-root.test.ts": "2c7087ed8038575eb24309a82744ec3bc3ab907a6c16ae9e38c2f3deb6041167",
-    "tests/verify-upstream.test.ts": "4a2f8ab27abd6878e6f6f3e1b88e5f14c196c7238eb31e6c6bc3425a3d2bf1e8"
+    "tests/verify-upstream.test.ts": "4a2f8ab27abd6878e6f6f3e1b88e5f14c196c7238eb31e6c6bc3425a3d2bf1e8",
+    "tests/zero-anchor-hint.test.ts": "7e3a553d268fafded4f15e44ccfb90fc94c8ab9f29240fcdee65fb8d07c66b23"
   }
 }

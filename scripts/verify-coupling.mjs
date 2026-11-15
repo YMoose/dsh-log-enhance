@@ -249,9 +249,29 @@ for (const argument of files) {
   for (const key of outcome.unprobed) report.push(`unprobed (no spec, no exemption): ${key}`)
   for (const key of outcome.stale) report.push(`stale (spec without a coupling record): ${key}`)
   for (const problem of outcome.mismatched) report.push(`root-type drift: ${problem}`)
+  // 零类型锚定面的显式提示（design.md 2.7）：裸的 `0/0 probes compile clean`
+  // 会被读者（含插件作者本人）误读成「类型契约检查通过」，而实际含义是
+  // 「声明了依赖但源码无显式 import/类型注解——类型契约不适用于该仓」
+  // （纯 JS / manifest 注入形态，语料实证 dsh-media-desk）。声明数读仓库
+  // 自己的 package.json（真相源）——coupling.packages 只在源码 import 时
+  // 记录，纯 JS 仓恒为空，不能作为判定依据。提示为 advisory，不改变退出码。
+  const manifestDeps = readFileSync(join(root, 'package.json'), 'utf8')
+  let declaredDshCount = 0
+  try {
+    const manifest = JSON.parse(manifestDeps)
+    for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const name of Object.keys(manifest[section] ?? {})) {
+        if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) declaredDshCount += 1
+      }
+    }
+  } catch { /* 无 package.json 或损坏：无声明可提示 */ }
+  const zeroAnchorHint = outcome.segments.length === 0 && declaredDshCount > 0
+    ? ` [no type-anchored surfaces: ${declaredDshCount} declared @deepseek-ai package(s) without explicit import/type usage — the type contract does not apply to pure-JS or manifest-injected coupling; runtime compatibility needs a runtime checker]`
+    : ''
   console.log(`${displayLabel}: ${verdict.pass}/${outcome.segments.length} probes compile clean`
     + (verdict.borrowed > 0 ? `, ${verdict.borrowed} borrowed surface(s)` : '')
     + (verdict.exempt > 0 ? `, ${verdict.exempt} runtime-contract surface(s) exempt` : '')
+    + zeroAnchorHint
     + (typesRoot !== undefined ? ` [types-root: ${dshSeriesVersions(typesRoot)}]` : ''))
   for (const entry of borrowed) {
     const sites = entry.count > 1 ? ` (${entry.count} sites)` : ''
