@@ -65,6 +65,26 @@ function cliOnlyCopy(): string {
   return dir
 }
 
+  test('sync normalizes SSH-over-443 remotes (ssh.github.com) to the https host', () => {
+    if (!existsSync(repoCli) || !existsSync(repoPayload)) return
+    // dsh-seam 自身 remote 即此形态（OAuth token 无 workflow scope 后切 SSH）；
+    // 归一化若保留 ssh.github.com 主机，产出的 https URL 不可达（CI 上 outdated
+    // 只能跳过版本检查——语料 run 43709098576 的真实观测）。
+    const { source } = buildSourceRepo('ssh://git@ssh.github.com:443/example/dsh-seam-fixture.git')
+    const consumer = mkdtempSync(join(tmpdir(), 'dsh-consumer-'))
+    try {
+      const synced = runCli(repoCli, ['sync', '--into', consumer, '--source', source], source)
+      assert.equal(synced.status, 0, synced.out)
+      const manifest = JSON.parse(readFileSync(join(consumer, '.dsh-seam.json'), 'utf8')) as {
+        source?: Record<string, unknown>
+      }
+      assert.equal(manifest.source?.repo, 'https://github.com/example/dsh-seam-fixture')
+    } finally {
+      rmSync(source, { recursive: true, force: true })
+      rmSync(consumer, { recursive: true, force: true })
+    }
+  })
+
 test('sync writes a portable manifest (repo + ref, no absolute path) and check runs fully offline', () => {
   if (!existsSync(repoCli) || !existsSync(repoPayload)) return
   const ORIGIN = 'https://github.com/example/dsh-seam-fixture.git'
