@@ -85,8 +85,8 @@ CI 配置本身不是证据）：
 | 阶段 | 触发 | 内容 | 参考实现 |
 |---|---|---|---|
 | S0 本地基线 | — | lockfile、engines.dsh、版本单源、baseline 机制、修集成测试 | 本文 |
-| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测（含 seam-verify 探针）→ 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → coupling 门禁 → `npm pack` 产物冒烟 | 本仓 `ci.yml`（2026-11-13 起不再用第三方 dsh-plugin-checker；workflow 不携带版本号。挂载覆盖以 **loader 路径**为准：seam-verify 探针 + 集成测试经真实 cordis-plugin-loader 挂载；`cordis.patch.yml` 经宿主 profile（`dsh plugin add`）的**应用路径** S1/S2 均无验证，pack 冒烟只断言文件在 tarball 内——登记在案的残余缺口） |
-| S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或任一列车成员同版本重发布**（主包 + 全部 dsh-* 子包逐一比对，不只主包）都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`；devDeps 与 engines.dsh **同一次原子推进**，上界随次 minor 重算 `-0`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` + coupling 门禁 + pack 冒烟（**与 S1 完全同一覆盖面**，绿 canary = 绿 S1 在新列车上的等价物）→ 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的**全部**材料（engines.dsh 已随 bump 推进，无需手改任何文件），跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs` |
+| S1 PR/push 门禁 | push/PR | `npm ci` → typecheck → 单测（含 seam-verify 探针）→ 集成 → build → 官方 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 导出）自检 manifest → coupling 门禁 → **seam 受管载荷门禁**（`dsh-seam check`：按 `.dsh-seam.json` 离线哈希对账受管文件，CLI 钉在清单 ref 上取用、不浮 main——防绕过 sync 手改受管文件；2026-11-15 起）→ `npm pack` 产物冒烟 | 本仓 `ci.yml`（2026-11-13 起不再用第三方 dsh-plugin-checker；workflow 不携带版本号。挂载覆盖以 **loader 路径**为准：seam-verify 探针 + 集成测试经真实 cordis-plugin-loader 挂载；`cordis.patch.yml` 经宿主 profile（`dsh plugin add`）的**应用路径** S1/S2 均无验证，pack 冒烟只断言文件在 tarball 内——登记在案的残余缺口） |
+| S2 跟随迭代 canary | 日绊线 + 周兜底；**已落地**（`.github/workflows/canary.yml`） | 绊线（`scripts/bump-upstream.mjs --check`，**无状态**：以已提交的 baseline.json 与 devDeps 列车为锚）比对 dist-tag `next` 与 registry `time`——列车前移**或任一列车成员同版本重发布**（主包 + 全部 dsh-* 子包逐一比对，不只主包）都触发；全量 run：bump（dist-tag `next` 优先，`versions` 末位兜底，绝不碰 `latest`；devDeps 与 engines.dsh **同一次原子推进**，上界随次 minor 重算 `-0`）→ 删 lockfile 重装 → 仓内重生成 baseline（有意安装不算漂移）→ `npm run check` + `check:compat` + coupling 门禁 + pack 冒烟（**与 S1 完全同一覆盖面**，绿 canary = 绿 S1 在新列车上的等价物）→ 上传 artifact。**绿后不自动开 PR**：artifact（package.json + lockfile + baseline.json）即 §5 重验 commit 的**全部**材料（engines.dsh 已随 bump 推进，无需手改任何文件），跟进上游保持有意识的人工决定 | langfuse upstream-canary（模式参考）；本仓 `scripts/bump-upstream.mjs`；绊线任务附 dsh-seam `outdated` 工具链上游提示（advisory，永不阻断——2026-11-15 起） |
 | S3 多线兼容矩阵 | ✗ **已取消**（2026-11-13 定策：单线跟随，见下） | ~~对每条已验证线：pack → 装入该版本真实 dsh CLI → `--dump-config` 断言挂载 → MCP 注册路径冒烟（覆盖 mountAnalysisServer）→ 卸载可逆~~（原方案存档备查） | dsh-context 基线 tag 矩阵（`DSH_REPO`）+ PerryLink compat 卸载检查 |
 
 > **维护策略（2026-11-13 定）——单线跟随**：只保证插件在 dist-tag `next` 的**最新发版**上可跑，能跑即可。不做多版本矩阵（S3 取消）；不跟上游 master（绊线只看 registry 元数据，本就与上游 git 仓库无关）。上游发新版 → 绊线触发 → Canary 全量验证 → 绿则产出 artifact，人工决定何时收编。
@@ -170,9 +170,12 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
    上游 CI 也能拿它验接入仓的清单）+ `tests/seam/` 验货引擎与标准规格库（见
    [seam-driven-verification.md](seam-driven-verification.md)；探针收窄不靠手写
    字典——守卫从插件自己的源码提取，验货器对上游结构不可知）+ 三个机制测试。
-   `node cli.mjs check` 按 `.dsh-seam.json`（源 commit + 逐文件 sha256）校验
+   `node cli.mjs check` 按 `.dsh-seam.json`（repo + ref + 逐文件 sha256）校验
    受管文件；本地改过的受管文件 sync 会拒绝覆盖——**引擎改动一律在 dsh-seam
-   侧发起、sync 回消费仓**，消费仓不留分叉。
+   侧发起、sync 回消费仓**，消费仓不留分叉。把 `check` 放进 S1 CI 即成受管
+   载荷门禁（clone dsh-seam 钉在清单 ref 上取 CLI，本体离线对账——本仓
+   `ci.yml` 的 `seam-payload` job 即范例）；`outdated` 可作 canary 的
+   advisory 上游提示（永不阻断）。
    各家自备（不在受管面）：`tests/contracts/{implicit-seams,seam-runs}.ts`、调
    `runSeamSuite` 的薄入口、现实版 `tests/baseline.test.ts`（机制半边随载荷走，
    现实半边各家自留）、`.github/workflows/{ci,canary}.yml`（S1 门禁与 S2 绊线

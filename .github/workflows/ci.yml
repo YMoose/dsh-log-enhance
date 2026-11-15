@@ -60,3 +60,40 @@ jobs:
       # (single-line follow): the only version state is package.json — the
       # devDeps train and engines.dsh, moved together by
       # scripts/bump-upstream.mjs — plus baseline.json.
+
+  # Managed-payload integrity gate (2026-11-15, two-repo reality): the seam
+  # toolchain lives in dsh-seam and reaches this repo as managed files;
+  # .dsh-seam.json is the single source of truth (source repo + pinned ref +
+  # per-file sha256). `sync` already refuses to clobber locally modified
+  # managed files — this gate extends that refusal to every PR/push: a
+  # hand-edited managed file goes red HERE and must land as a sync from
+  # dsh-seam instead. `check` itself is offline and deterministic (dsh-seam
+  # design decision 7: manifest hashes only — no source repo, no network);
+  # the clone below exists solely to obtain the CLI, pinned to the SAME ref
+  # that produced the manifest, never a floating main, so dsh-seam evolution
+  # cannot break this gate. Corollary discipline: sync only from pushed
+  # states — an unpushed pinned ref fails loudly at checkout right here.
+  # The canary intentionally does NOT repeat this gate: managed files are
+  # train-invariant, so S1 owns this surface; the canary repeats only the
+  # train-dependent gates (review P3's "same gate surface" is about the train).
+  seam-payload:
+    name: managed payload integrity (dsh-seam check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        # v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      - name: Gate the managed seam payload against .dsh-seam.json
+        run: |
+          repo=$(node -p "require('./.dsh-seam.json').source.repo")
+          ref=$(node -p "require('./.dsh-seam.json').source.ref")
+          git clone --quiet "$repo" "$RUNNER_TEMP/dsh-seam"
+          git -C "$RUNNER_TEMP/dsh-seam" checkout --quiet "$ref"
+          node "$RUNNER_TEMP/dsh-seam/cli.mjs" check --into .

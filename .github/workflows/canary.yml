@@ -53,6 +53,26 @@ jobs:
           fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
+      # Toolchain upstream notice (advisory ONLY — can never gate the canary):
+      # the seam toolchain itself lives in a separate repo; `outdated` reports
+      # whether it has moved past the ref pinned in .dsh-seam.json (dsh-seam
+      # design decision 7: advisory commands never hold exit power).
+      # continue-on-error keeps even a network failure from blocking the train
+      # decision; the notice is fenced into the run summary.
+      - name: Notice dsh-seam toolchain updates (advisory, never blocking)
+        continue-on-error: true
+        run: |
+          repo=$(node -p "require('./.dsh-seam.json').source.repo")
+          ref=$(node -p "require('./.dsh-seam.json').source.ref")
+          git clone --quiet "$repo" "$RUNNER_TEMP/dsh-seam"
+          git -C "$RUNNER_TEMP/dsh-seam" checkout --quiet "$ref"
+          {
+            echo '### dsh-seam toolchain status (advisory)'
+            echo '```'
+            node "$RUNNER_TEMP/dsh-seam/cli.mjs" outdated --into .
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   canary:
     needs: tripwire
     # Any scheduled run that is NOT the daily tripwire cron is the weekly
