@@ -269,9 +269,18 @@ export function findRepositoryRoot(packageName?: string, options?: { readonly re
 export const readText = (root: string, relativePath: string): string =>
   readFileSync(join(root, relativePath), 'utf8')
 
+/** coupling.json 契约结构版本（design.md 决策 8）：未知版本拒绝执行并提示
+ *  重新生成或升级；缺省（旧版文件）按当前版本语义继续执行。 */
+export const COUPLING_SCHEMA_VERSION = 1
+
 /** 解析 `{root}/coupling.json`（显性层清单）。 */
 export function loadCoupling(root: string): Coupling {
-  return JSON.parse(readText(root, 'coupling.json')) as Coupling
+  const parsed = JSON.parse(readText(root, 'coupling.json')) as Coupling & { schemaVersion?: unknown }
+  if (parsed.schemaVersion !== undefined && parsed.schemaVersion !== COUPLING_SCHEMA_VERSION) {
+    throw new Error(`coupling.json schema version ${String(parsed.schemaVersion)} is not supported `
+      + `(dsh-seam understands ${COUPLING_SCHEMA_VERSION}); regenerate with \`dsh-seam scan --write\` or upgrade dsh-seam`)
+  }
+  return parsed
 }
 
 export const quote = (value: string): string => JSON.stringify(value)

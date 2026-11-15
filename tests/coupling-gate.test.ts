@@ -118,6 +118,7 @@ test('an acknowledged suspect passes --check', () => {
 
 interface EngineApi {
   compareVersions(a: string, b: string): number
+  loadCoupling(root: string): unknown
   probeSpecsFromCoupling(coupling: unknown): {
     fieldSpecs: Record<string, unknown>
     discriminantSpecs: Record<string, unknown>
@@ -1979,5 +1980,114 @@ export function handleEvent(evt: SessionEvent): void {
     assert.match(committed.stdout, /packages\/beta: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
   } finally {
     rmSync(monorepo, { recursive: true, force: true })
+  }
+})
+
+// --- coupling.json 溯源元数据（design.md 决策 8） -----------------------------------
+
+/** Minimal contract that verifies green against writeMockUpstream(root, true). */
+function minimalContract(): Record<string, unknown> {
+  return {
+    packages: {
+      '@deepseek-ai/cordis': { declaredIn: ['devDependencies'], roots: { src: { type: ['src/a.ts'], value: [] } } },
+      '@deepseek-ai/dsh-demo': { declaredIn: ['devDependencies'], roots: { src: { type: ['src/a.ts'], value: [] } } },
+    },
+    injectedServices: [],
+    srcHooks: [],
+    testHooks: [],
+    ctxAccesses: {},
+    fieldPaths: {
+      '@deepseek-ai/dsh-demo': {
+        'data.inserted': {
+          rootType: 'SessionEvent',
+          accesses: [{
+            site: 'src/a.ts:10',
+            guards: [{ expr: 'event.type', kind: 'eq', literal: 'call' }],
+          }],
+        },
+      },
+    },
+    discriminants: {},
+  }
+}
+
+test('--write stamps schemaVersion, generator, and generatedAt; the --check drift gate ignores metadata keys (decision 8)', () => {
+  const root = fixtureRoot('')
+  try {
+    const written = runScript(['--write'], root)
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    const stamped = JSON.parse(readFileSync(join(root, 'coupling.json'), 'utf8')) as {
+      schemaVersion?: number
+      generator?: { dshSeam?: string; typescript?: string }
+      generatedAt?: string
+    }
+    assert.equal(stamped.schemaVersion, 1)
+    assert.equal(typeof stamped.generator?.dshSeam, 'string')
+    assert.ok((stamped.generator?.dshSeam ?? '').length > 0, 'dshSeam provenance must be a non-empty string')
+    assert.equal(typeof stamped.generator?.typescript, 'string')
+    assert.match(stamped.generatedAt ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+
+    // A fresh generatedAt on every scan must never read as contract drift.
+    const check = runScript(['--check'], root)
+    assert.equal(check.status, 0, `${check.stdout}\n${check.stderr}`)
+    assert.match(check.stdout, /coupling inventory matches coupling\.json/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('--write is idempotent: a second run over an unchanged inventory rewrites nothing', () => {
+  const root = fixtureRoot('')
+  try {
+    assert.equal(runScript(['--write'], root).status, 0)
+    const first = readFileSync(join(root, 'coupling.json'), 'utf8')
+    const second = runScript(['--write'], root)
+    assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`)
+    assert.equal(readFileSync(join(root, 'coupling.json'), 'utf8'), first)
+    assert.match(second.stdout, /unchanged/i)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('verify refuses a coupling.json stamped with an unknown schema version', async () => {
+  const VERIFY_SCRIPT = fileURLToPath(new URL('../../scripts/verify-coupling.mjs', import.meta.url))
+  const root = mkdtempSync(join(tmpdir(), 'dsh-schema-unknown-'))
+  try {
+    writeMockUpstream(root, true)
+    const couplingPath = join(root, 'coupling.json')
+    writeFileSync(couplingPath, JSON.stringify({ schemaVersion: 99, ...minimalContract() }))
+    const fail = spawnSync(process.execPath, [VERIFY_SCRIPT, couplingPath], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: { ...process.env, DSH_SEAM_ROOT: root },
+    })
+    assert.equal(fail.status, 1, 'an unknown schema version must refuse to run')
+    assert.match(fail.stdout + fail.stderr, /schema version/i)
+
+    // The Level 2 suite path (engine.loadCoupling) enforces the same gate.
+    const engine = await loadEngine()
+    assert.throws(() => engine.loadCoupling(root), /schema version/i)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a legacy coupling.json without schemaVersion still verifies (back-compat, notice only)', () => {
+  const VERIFY_SCRIPT = fileURLToPath(new URL('../../scripts/verify-coupling.mjs', import.meta.url))
+  const root = mkdtempSync(join(tmpdir(), 'dsh-schema-legacy-'))
+  try {
+    writeMockUpstream(root, true)
+    const couplingPath = join(root, 'coupling.json')
+    writeFileSync(couplingPath, JSON.stringify(minimalContract()))
+    const pass = spawnSync(process.execPath, [VERIFY_SCRIPT, couplingPath], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: { ...process.env, DSH_SEAM_ROOT: root },
+    })
+    assert.equal(pass.status, 0, `${pass.stdout}\n${pass.stderr}`)
+    assert.match(pass.stdout, /probes compile clean/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

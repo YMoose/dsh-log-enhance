@@ -104,6 +104,12 @@ for (const argument of files) {
     continue
   }
   const coupling = JSON.parse(readFileSync(resolve(process.cwd(), argument), 'utf8'))
+  if (coupling.schemaVersion !== undefined && coupling.schemaVersion !== 1) {
+    console.error(`${displayLabel}: coupling.json schema version ${coupling.schemaVersion} 不受当前 dsh-seam 支持`
+      + '（可识别版本 1）：用 dsh-seam scan --write 重新生成，或升级 dsh-seam')
+    failed = true
+    continue
+  }
   const specs = probeSpecsFromCoupling(coupling)
   /** Display name of a segment id: `pkg::path`（去掉 site 后缀与类别前缀）。 */
   const surfaceName = id => {

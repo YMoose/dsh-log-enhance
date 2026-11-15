@@ -2059,13 +2059,73 @@ function sectionDiff(before, after) {
 
 const data = canonical()
 
-if (MODE === 'write') {
-  writeFileSync(COUPLING_URL, `${JSON.stringify(data, null, 2)}\n`)
-  const discriminants = Object.values(data.discriminants)
+/** coupling.json 头部溯源元数据（design.md 决策 8）：版本、生成器与时间戳
+ *  不属于契约内容，漂移门禁与幂等写入都必须忽略它们。 */
+const METADATA_KEYS = ['schemaVersion', 'generator', 'generatedAt']
+const SCHEMA_VERSION = 1
+
+/** dsh-seam 版本溯源：直接运行时取本仓 package.json；同步脚本场景取插件仓
+ *  `.dsh-seam.json` 记录的 `source.commit`；都拿不到则如实标记 unknown。 */
+function dshSeamProvenance() {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (;;) {
+    const candidate = join(dir, 'package.json')
+    if (existsSync(candidate)) {
+      try {
+        const pkg = JSON.parse(readFileSync(candidate, 'utf8'))
+        if (pkg.name === 'dsh-seam' && typeof pkg.version === 'string') return pkg.version
+      } catch {}
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.dsh-seam.json'), 'utf8'))
+    const ref = manifest?.source?.commit
+    if (typeof ref === 'string' && ref.trim() !== '' && ref !== 'unknown') return `ref:${ref.slice(0, 12)}`
+  } catch {}
+  return 'unknown'
+}
+
+/** 剔除元数据键，只留契约内容（比较幂等与漂移都基于它）。 */
+function contractOf(document) {
+  return Object.fromEntries(Object.entries(document).filter(([key]) => !METADATA_KEYS.includes(key)))
+}
+
+function summaryLine(document) {
+  const discriminants = Object.values(document.discriminants)
     .reduce((total, paths) => total + Object.keys(paths).length, 0)
-  console.log(`coupling.json written: ${Object.keys(data.packages).length} packages, `
-    + `${data.injectedServices.length} injected services, ${data.srcHooks.length} src hooks, `
-    + `${discriminants} discriminant paths, ${data.testHooks.length} test touch points`)
+  return `${Object.keys(document.packages).length} packages, `
+    + `${document.injectedServices.length} injected services, ${document.srcHooks.length} src hooks, `
+    + `${discriminants} discriminant paths, ${document.testHooks.length} test touch points`
+}
+
+function writeStampedContract() {
+  const stamped = {
+    schemaVersion: SCHEMA_VERSION,
+    generator: { dshSeam: dshSeamProvenance(), typescript: ts.version },
+    generatedAt: new Date().toISOString(),
+    ...data,
+  }
+  writeFileSync(COUPLING_URL, `${JSON.stringify(stamped, null, 2)}\n`)
+  console.log(`coupling.json written (${dshSeamProvenance()}, typescript ${ts.version}): ${summaryLine(data)}`)
+}
+
+if (MODE === 'write') {
+  let existing = null
+  try {
+    existing = JSON.parse(readFileSync(COUPLING_URL, 'utf8'))
+  } catch {}
+  const contractUnchanged = existing !== null
+    && JSON.stringify(contractOf(existing)) === JSON.stringify(data)
+  if (contractUnchanged && existing.schemaVersion === SCHEMA_VERSION) {
+    // 幂等写入：契约内容未变时不动文件，generatedAt 保持“内容实际变化的时间”。
+    console.log(`coupling.json unchanged: ${summaryLine(data)}`)
+  } else {
+    // 契约变化，或旧版文件（无 schemaVersion）需要补戳元数据头。
+    writeStampedContract()
+  }
 } else if (MODE === 'check') {
   let committed
   try {
@@ -2074,7 +2134,15 @@ if (MODE === 'write') {
     console.error('coupling.json 缺失或不可读：先跑默认模式 review 草表，再 --write 生成并提交')
     process.exit(1)
   }
-  const allSections = [...new Set([...Object.keys(data), ...Object.keys(committed)])]
+  if (committed.schemaVersion !== undefined && committed.schemaVersion !== SCHEMA_VERSION) {
+    console.error(`coupling.json schema version ${committed.schemaVersion} 不受当前 dsh-seam 支持`
+      + `（可识别版本 ${SCHEMA_VERSION}）：用 dsh-seam scan --write 重新生成，或升级 dsh-seam`)
+    process.exit(1)
+  }
+  if (committed.schemaVersion === undefined) {
+    console.log('~ legacy coupling.json（无 schemaVersion）：重新 --write 一次即可记录生成器与时间戳溯源')
+  }
+  const allSections = [...new Set([...Object.keys(data), ...Object.keys(contractOf(committed))])]
   const drifted = allSections.filter(
     section => JSON.stringify(committed[section]) !== JSON.stringify(data[section]),
   )
