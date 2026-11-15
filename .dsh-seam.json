@@ -1,13 +1,13 @@
 {
   "source": {
-    "repo": "https://github.com/YMoose/dsh-seam",
-    "ref": "c8fd8b9dcd73a5b203dedee40da21ecf20178624"
+    "repo": "https://ssh.github.com/YMoose/dsh-seam",
+    "ref": "4490471392a6767af71ee42a81a22183e56ab03a"
   },
   "files": {
-    "scripts/analyze-dsh-coupling.mjs": "6e38498ef9da7d6f6d4f917366e5d8989bbea672ea783b386ddb3e041da63f96",
+    "scripts/analyze-dsh-coupling.mjs": "b6bae1449b25b0692066d9819426fcb6ef71925ed58513b66f4afaf14ae9c250",
     "scripts/bump-upstream.mjs": "76740481ad9d4dc10064aedb122c5e543254f6c39d346915ee87cc7aeea02c77",
     "scripts/check-compat.mjs": "12c02e4ed3b65a5853343484bf472e5ccbac32f4940c7bef0a2a01d5ba8babaf",
-    "scripts/verify-coupling.mjs": "3081f7416ba754b57db1edb581ae4dbbe98d5e77e94243a11ed9eeccb885ff24",
+    "scripts/verify-coupling.mjs": "085830f5213fde10952972ae5f940d0b7ae234e396e72eab1b5c92c5a6fc5b4e",
     "scripts/write-baseline.mjs": "4b6d2a773061fad8f71f87a01510b00c38de5f2fa24961c647b61300d7307f56",
     "tests/baseline-fingerprint.test.ts": "1c73a5504f0f20f25f37640cbe458fb485269dd034b3bb67bc6411c60cd5ecdd",
     "tests/bump-upstream.test.ts": "b926040a15d659032915b43f1bbee18f6f570ead1e3d9c0f6ec30d2126ce8932",
@@ -15,6 +15,7 @@
     "tests/coupling-gate.test.ts": "13c404e777129f77ea7c6e58008797938df64a0194bfdfb6eb7a51bce38d3a76",
     "tests/seam-suite.test.ts": "c12f9e51325ad90475bf298c53b98b3c10e695b462c72b563ae787794b38981d",
     "tests/seam/engine.ts": "11dfdc4da9881063187cf547831cb650d4b9be3cd4014aad4eac472a53ac67b7",
-    "tests/seam/standard-specs.ts": "6e27debb834650fbc96d4fcfea602155cd679d21ed6c431afd85c710965d2bfb"
+    "tests/seam/standard-specs.ts": "6e27debb834650fbc96d4fcfea602155cd679d21ed6c431afd85c710965d2bfb",
+    "tests/typescript-native-guard.test.ts": "2232d1def074bb61aba8da2669b37b8c8115264ba11e5fc0a9c16ca03dfc303a"
   }
 }

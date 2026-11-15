@@ -19,6 +19,38 @@ if (files.length === 0) { console.error('usage: verify-coupling.mjs <coupling.js
 const rootOverride = process.env.DSH_SEAM_ROOT ?? process.env.DSH_LOG_ENHANCE_ROOT
 
 async function loadEngine(rootHint) {
+  // 原生版 typescript@7（Go 实现）的根导出只有版本存根，没有经典 Compiler API；
+  // 引擎自身 import 的 typescript 若解析到它，会在 checkContract 深处炸成天书
+  // （ts.createProgram is not a function）。守卫必须先于 engine 候选加载：
+  // 本仓可解析的 typescript 全部缺少经典 API 时，显式报错点名版本与路径。
+  // （判定式与 analyze-dsh-coupling.mjs 的 hasClassicCompilerApi 同义：
+  //  payload 各脚本独立可执行，不走跨文件 import。）
+  const anchors = [
+    import.meta.url,
+    ...(rootHint !== undefined ? [pathToFileURL(join(rootHint, 'package.json')).href] : []),
+    pathToFileURL(join(process.cwd(), 'package.json')).href,
+  ]
+  const nativeStubs = new Set()
+  let classicFound = false
+  for (const anchor of anchors) {
+    try {
+      const requireFrom = createRequire(anchor)
+      const candidate = requireFrom('typescript')
+      if (typeof candidate?.createProgram === 'function'
+        && typeof candidate?.createSourceFile === 'function'
+        && candidate?.SyntaxKind !== undefined) {
+        classicFound = true
+        break
+      }
+      nativeStubs.add(`typescript@${String(candidate?.version ?? 'unknown')} (${requireFrom.resolve('typescript')})`)
+    } catch {}
+  }
+  if (!classicFound && nativeStubs.size > 0) {
+    console.error(`${[...nativeStubs].join(', ')}: this typescript has no classic Compiler API`
+      + ' (required by the seam engine) — the native 7.x build ships only a version stub.'
+      + ' Install the JS-based typescript (5.x/6.x) in this repository.')
+    process.exit(1)
+  }
   const engineCandidates = [
     new URL('../dist-test/tests/seam/engine.js', import.meta.url),
     new URL('../tests/seam/engine.js', import.meta.url),
@@ -36,11 +68,6 @@ async function loadEngine(rootHint) {
     console.error('cannot locate seam engine (tests/seam/engine.js or tests/seam/engine.ts)')
     process.exit(1)
   }
-  const anchors = [
-    import.meta.url,
-    ...(rootHint !== undefined ? [pathToFileURL(join(rootHint, 'package.json')).href] : []),
-    pathToFileURL(join(process.cwd(), 'package.json')).href,
-  ]
   let ts
   let tsUrl
   for (const anchor of anchors) {

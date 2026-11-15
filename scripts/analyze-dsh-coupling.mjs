@@ -68,16 +68,35 @@ function dshNodeModulesBase(fromRoot) {
   }
 }
 
+/** 原生版 typescript@7（Go 实现）的根导出只有版本存根（lib/version.cjs），
+ * 没有经典 Compiler API；插件生态已出现 pin ^7.0.2 的仓（语料 CI 首轮事故）。
+ * 解析到这类包时显式报错点名版本与路径，而不是让 ts.SyntaxKind 在扫描
+ * 深处炸成天书 TypeError。 */
+function hasClassicCompilerApi(candidate) {
+  return typeof candidate?.createProgram === 'function'
+    && typeof candidate?.createSourceFile === 'function'
+    && candidate?.SyntaxKind !== undefined
+}
+
 function loadTypeScript() {
   const anchors = [
     import.meta.url,
     pathToFileURL(join(REPO_ROOT, 'package.json')).href,
     pathToFileURL(join(process.cwd(), 'package.json')).href,
   ]
+  const nativeStubs = new Set()
   for (const anchor of anchors) {
     try {
-      return createRequire(anchor)('typescript')
+      const requireFrom = createRequire(anchor)
+      const candidate = requireFrom('typescript')
+      if (hasClassicCompilerApi(candidate)) return candidate
+      nativeStubs.add(`typescript@${String(candidate?.version ?? 'unknown')} (${requireFrom.resolve('typescript')})`)
     } catch {}
+  }
+  if (nativeStubs.size > 0) {
+    throw new Error(`resolved ${[...nativeStubs].join(', ')}: this typescript has no classic Compiler API`
+      + ' (ts.createProgram / ts.SyntaxKind are missing) — the native 7.x build ships only a version stub.'
+      + ' dsh-seam needs the JS-based typescript (5.x/6.x) resolvable from this repository.')
   }
   throw new Error(`cannot resolve package "typescript" from ${REPO_ROOT} or ${fileURLToPath(import.meta.url)}`)
 }
