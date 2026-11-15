@@ -1998,6 +1998,38 @@ function report(data) {
   }
   lines.push('')
 
+  // manifest 声明面的边界标注（design.md 2.8）：client.inject 模块与 bundle.patch
+  // 是运行时耦合（宿主注入/装载期介入），源码无 import 与类型注解——类型契约
+  // 不覆盖。只进人读报告、绝不写入 coupling.json（原则 5：coupling 是可独立
+  // 验证的快照，不收无法验证的条目；manifest 本就在 package.json，转录会制
+  // 造两份真相）。无声明的仓不出现本节，不添噪音。
+  const manifestDeclarations = (() => {
+    try {
+      const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
+      const rows = []
+      const inject = manifest?.dsh?.client?.inject
+      if (Array.isArray(inject) && inject.length > 0) {
+        rows.push(['`dsh.client.inject`', inject.filter(name => typeof name === 'string').join(', ')])
+      }
+      const patch = manifest?.dsh?.bundle?.patch
+      if (typeof patch === 'string' && patch !== '') rows.push(['`dsh.bundle.patch`', patch])
+      return rows
+    } catch { return [] }
+  })()
+  if (manifestDeclarations.length > 0) {
+    lines.push('### manifest 声明面（边界标注：运行时耦合，类型契约不覆盖）')
+    lines.push('')
+    lines.push('| 来源 | 声明 |')
+    lines.push('|---|---|')
+    for (const [source, declaration] of manifestDeclarations) lines.push(`| ${source} | ${declaration} |`)
+    lines.push('')
+    // 简要语义说明（分工定型：展开的处理指引归 README §5.3，报告只讲清边界
+    // 差别——运行时耦合不走类型契约、存在性归 --upstream，一两句点到为止）。
+    lines.push('> 以上为运行时耦合（宿主注入 / 装载期介入，源码无 import 与类型注解）：本报告与 `verify` 的类型契约不覆盖；')
+    lines.push('> `verify --upstream` 仅对注入模块做 registry 存在性检查。各边界的语义与处理方式见 README「检查边界与职责划分」。')
+    lines.push('')
+  }
+
   lines.push(`## 层 1 · 进程内契约（src 注册 ${data.srcHooks.length} 个 hook）`)
   lines.push('')
   lines.push(`插件注入面（\`export const inject\`；宿主服务改名即插件静默不启动）：${data.injectedServices.join(', ') || '—'}`)

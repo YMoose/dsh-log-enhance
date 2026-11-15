@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -68,6 +68,59 @@ test('verify names the empty type-anchor surface explicitly instead of a bare 0/
     assert.match(output, /0\/0 probes compile clean/, 'the verdict line keeps its familiar shape')
     assert.match(output, /no type-anchored surfaces/i, 'the hint names the empty anchor surface')
     assert.match(output, /does not apply/i, 'the hint states the type contract does not apply here')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('scan report marks manifest-declared runtime coupling as outside the type contract', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-manifest-mark-'))
+  try {
+    // dsh-nce 形态的最小复刻：纯 JS、耦合全在 manifest（client.inject + bundle.patch）。
+    writeFileSync(join(root, 'package.json'), `${JSON.stringify({
+      name: 'fixture-manifest-coupling',
+      private: true,
+      type: 'module',
+      dsh: {
+        bundle: { patch: './cordis.patch.yml' },
+        client: {
+          platform: 'web',
+          inject: ['@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar'],
+        },
+      },
+    }, null, 2)}\n`)
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src', 'index.js'), 'export function render() { return 1 }\n')
+    const scanned = spawnSync(process.execPath, [ANALYZE], {
+      encoding: 'utf8', timeout: 60_000, cwd: root, env: { ...process.env, DSH_SEAM_ROOT: root },
+    })
+    assert.equal(scanned.status, 0, `scanner failed:\n${scanned.stdout}\n${scanned.stderr}`)
+    const report = `${scanned.stdout}\n${scanned.stderr}`
+    assert.match(report, /manifest 声明面/, 'the report has a dedicated manifest section')
+    assert.match(report, /@deepseek-ai\/dsh-client-ui-layout/, 'the injected modules are listed by name')
+    assert.match(report, /\.\/cordis\.patch\.yml/, 'the patch file is listed')
+    assert.match(report, /不覆盖|类型契约.*不/, 'the section states the type contract does not cover these')
+    // 边界标注只进人读报告，绝不进 coupling.json（design 2.8：不制造两份真相）。
+    const written = spawnSync(process.execPath, [ANALYZE, '--write'], {
+      encoding: 'utf8', timeout: 60_000, cwd: root, env: { ...process.env, DSH_SEAM_ROOT: root },
+    })
+    assert.equal(written.status, 0, written.stderr)
+    const coupling = JSON.parse(readFileSync(join(root, 'coupling.json'), 'utf8')) as Record<string, unknown>
+    const serialized = JSON.stringify(coupling)
+    assert.doesNotMatch(serialized, /client-ui-layout/, 'manifest declarations must NOT leak into coupling.json')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('scan report stays silent about manifest when the repo declares none', () => {
+  const root = writePureJsRepo()
+  try {
+    const scanned = spawnSync(process.execPath, [ANALYZE], {
+      encoding: 'utf8', timeout: 60_000, cwd: root, env: { ...process.env, DSH_SEAM_ROOT: root },
+    })
+    assert.equal(scanned.status, 0, scanned.stderr)
+    assert.doesNotMatch(`${scanned.stdout}`, /manifest 声明面/, 'no manifest section without manifest declarations')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

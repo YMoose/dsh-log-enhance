@@ -4,10 +4,13 @@
  *
  * 联网部分（npm pack 拉取、tag 解析、lockstep 校验、临时 types-root 装配）
  * 依赖真实 registry，不入机制测试（必须离线可跑、随 payload 同步到插件仓）；
- * 本文件覆盖两条在触网之前就必须成立的错误路径：
+ * 本文件覆盖三条在触网之前/之外就必须成立的行为：
  *   1. `--upstream` 与 `--types-root` 互斥（upstream 自己装配临时 types-root）；
  *   2. 仓库 coupling 里没有任何 @deepseek-ai/dsh-* 表面时显式报错退出，
- *      而不是带着空包集合去打 registry 或静默退化。
+ *      而不是带着空包集合去打 registry 或静默退化；
+ *   3. manifest `dsh.client.inject` 模块的提取与 registry 存在性判定
+ *      （design.md 2.8）——纯函数离线单测，npm view 的真实网络行为由真实
+ *      语料仓实测覆盖（dsh-nce 形态）。
  *
  * 本文件同步到插件仓后自动跳过（cli.mjs 仅存在于 dsh-seam 仓库）。
  */
@@ -75,5 +78,59 @@ if (existsSync(repoCli)) {
     // 比目标还新的包（target 时代不存在）没有可回落形态 → null（整体失败）。
     assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.3.0']), null, 'a package newer than the target cannot fall back')
     assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', []), null, 'a package with no published versions cannot fall back')
+  })
+
+  // design.md 2.8：manifest 注入形态的 registry 存在性检查。client.inject 模块
+  // 是纯 JS / manifest 注入仓唯一可见的耦合声明（源码无 import、类型契约不覆盖），
+  // `verify --upstream` 对它们只做存在性检查（不 pack、无探针）——上游改名/下架
+  // 在装配阶段显式报错。提取与判定逻辑为纯函数，离线单测。
+  test('manifestInjectModulesOf extracts sorted unique client.inject declarations', async () => {
+    const cli = await import(repoCli) as { manifestInjectModulesOf?: (root: string) => string[] }
+    assert.equal(typeof cli.manifestInjectModulesOf, 'function', 'cli.mjs must export manifestInjectModulesOf (guarded main)')
+    const root = mkdtempSync(join(tmpdir(), 'dsh-inject-'))
+    try {
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({
+        name: 'fx-inject', private: true, type: 'module',
+        dsh: { client: { inject: ['@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar', 42] } },
+      })}\n`)
+      assert.deepEqual(
+        cli.manifestInjectModulesOf!(root),
+        ['@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar'],
+        'sorted, deduped, non-string entries dropped',
+      )
+      const plain = mkdtempSync(join(tmpdir(), 'dsh-inject-plain-'))
+      try {
+        writeFileSync(join(plain, 'package.json'), `${JSON.stringify({ name: 'fx-plain', private: true })}\n`)
+        assert.deepEqual(cli.manifestInjectModulesOf!(plain), [], 'no dsh field -> no injected modules')
+      } finally { rmSync(plain, { recursive: true, force: true }) }
+      const bare = mkdtempSync(join(tmpdir(), 'dsh-inject-bare-'))
+      try {
+        assert.deepEqual(cli.manifestInjectModulesOf!(bare), [], 'no package.json at all -> empty, no throw')
+      } finally { rmSync(bare, { recursive: true, force: true }) }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('verifyInjectModulesOnRegistry names the module and its declaring repo when the registry lacks it', async () => {
+    const cli = await import(repoCli) as {
+      verifyInjectModulesOnRegistry?: (
+        modules: Map<string, readonly string[]>,
+        runView: (name: string) => { status: number; stdout: string; stderr: string },
+      ) => string | null
+    }
+    assert.equal(typeof cli.verifyInjectModulesOnRegistry, 'function', 'cli.mjs must export verifyInjectModulesOnRegistry (guarded main)')
+    const modules = new Map([['@deepseek-ai/dsh-client-ui-layout', ['/repo/fixture-a']]])
+    assert.equal(
+      cli.verifyInjectModulesOnRegistry!(modules, () => ({ status: 0, stdout: '"2.3.0"', stderr: '' })),
+      null,
+      'a module the registry still serves passes the existence check',
+    )
+    const failure = cli.verifyInjectModulesOnRegistry!(modules, () => ({ status: 1, stdout: '', stderr: 'npm error code E404' }))
+    assert.ok(failure !== null, 'a module missing from the registry must produce an explicit failure')
+    assert.match(failure, /dsh-client-ui-layout/, 'the failure names the module')
+    assert.match(failure, /fixture-a/, 'the failure names the declaring repo')
+    assert.match(failure, /rename|unpublish/i, 'the failure points at rename/unpublish as the likely cause')
+    assert.match(failure, /E404/, 'the failure keeps the underlying npm error for diagnosis')
   })
 }
