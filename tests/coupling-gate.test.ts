@@ -1864,3 +1864,120 @@ export function handleEvent(evt: SessionEvent): void {
     rmSync(monorepo, { recursive: true, force: true })
   }
 })
+
+test('cli --recursive: transparent workspace discovery, per-package gates, aggregated exit code (decision 15)', () => {
+  const repoCli = fileURLToPath(new URL('../../../cli.mjs', import.meta.url))
+  if (!existsSync(repoCli)) return
+
+  const monorepo = mkdtempSync(join(tmpdir(), 'dsh-recursive-'))
+  try {
+    // monorepo root: workspaces declaration + hoisted train (npm workspaces layout)
+    writeFileSync(join(monorepo, 'package.json'), JSON.stringify({
+      name: 'fixture-monorepo', version: '0.0.0', private: true, workspaces: ['packages/*'],
+    }))
+    const cordisDir = join(monorepo, 'node_modules/@deepseek-ai/cordis')
+    const demoDir = join(monorepo, 'node_modules/@deepseek-ai/dsh-demo')
+    mkdirSync(cordisDir, { recursive: true })
+    mkdirSync(demoDir, { recursive: true })
+    writeFileSync(join(cordisDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(cordisDir, 'index.d.ts'), `
+export interface Events {
+  'demo/event': (payload: { kind: 'a' }) => void
+}
+export class Context {
+  on<K extends keyof Events>(event: K, callback: Events[K]): void
+  logger: { info(msg: string): void }
+}
+`)
+    writeFileSync(join(demoDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-demo', version: '0.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(demoDir, 'index.d.ts'), 'export type SessionEvent = { data: { id: string } }\n')
+
+    const writePackage = (name: string, dshDeps: number, source?: string): string => {
+      const dir = join(monorepo, 'packages', name)
+      mkdirSync(join(dir, 'src'), { recursive: true })
+      const dependencies = dshDeps > 0
+        ? { '@deepseek-ai/cordis': '4.1.0', '@deepseek-ai/dsh-demo': '0.1.0' }
+        : { react: '18.3.1' }
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `fixture-${name}`, version: '0.0.0', type: 'module', dependencies }))
+      if (source !== undefined) writeFileSync(join(dir, 'src/plugin.ts'), source)
+      return dir
+    }
+    const alpha = writePackage('alpha', 2, `
+import type { Context } from '@deepseek-ai/cordis'
+export function apply(app: Context): void {
+  app.logger.info('boot')
+}
+`)
+    const beta = writePackage('beta', 2, `
+import type { SessionEvent } from '@deepseek-ai/dsh-demo'
+export function handleEvent(evt: SessionEvent): void {
+  void evt.data.id
+}
+`)
+    writePackage('gamma', 0) // 非 DSH 插件包：出现在发现表里但永不执行
+
+    // 1) 默认（无 --recursive）：根零耦合 → 透明引导，不代替执行
+    const guided = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo], {
+      encoding: 'utf8', timeout: 60_000,
+    })
+    assert.equal(guided.status, 0, `${guided.stdout}\n${guided.stderr}`)
+    assert.match(guided.stdout, /NOTE: this root declares no @deepseek-ai\/\* dependency, but 2 workspace package\(s\) do:/)
+    assert.match(guided.stdout, /- packages\/alpha \(2 @deepseek-ai dep\(s\)\)/)
+    assert.ok(!existsSync(join(alpha, 'coupling.json')), 'guidance must not execute or write anything')
+
+    // 2) --recursive verify（免落盘路径）：发现表 + 逐包绿 + gamma 跳过 + 聚合行
+    const verified = spawnSync(process.execPath, [repoCli, 'verify', '--repo', monorepo, '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+    assert.match(verified.stdout, /packages\/alpha\s+2 @deepseek-ai dep\(s\) -> scan\/verify/)
+    assert.match(verified.stdout, /packages\/gamma\s+skip \(no @deepseek-ai\/\* dependency/)
+    assert.match(verified.stdout, /==> verify packages\/alpha/)
+    assert.match(verified.stdout, /==> verify packages\/beta/)
+    assert.doesNotMatch(verified.stdout, /==> verify packages\/gamma/)
+    assert.match(verified.stdout, /recursive verify: 2 plugin package\(s\), green/)
+
+    // 3) --recursive scan --write：coupling.json 只落进插件包，根目录不落盘
+    const written = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo, '--write', '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    assert.ok(existsSync(join(alpha, 'coupling.json')), 'alpha gets a committed contract')
+    assert.ok(existsSync(join(beta, 'coupling.json')), 'beta gets a committed contract')
+    assert.ok(!existsSync(join(monorepo, 'packages/gamma/coupling.json')), 'non-plugin packages stay untouched')
+    assert.ok(!existsSync(join(monorepo, 'coupling.json')), 'the workspace root stays untouched')
+
+    // 4) beta 契约漂移 → --recursive --check 聚合判红（alpha 仍绿，退出码 1）
+    const betaCouplingPath = join(beta, 'coupling.json')
+    const betaCoupling = JSON.parse(readFileSync(betaCouplingPath, 'utf8')) as {
+      fieldPaths: Record<string, unknown>
+    }
+    delete betaCoupling.fieldPaths['@deepseek-ai/dsh-demo']
+    writeFileSync(betaCouplingPath, JSON.stringify(betaCoupling))
+    const drifted = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo, '--check', '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(drifted.status, 1, 'one drifted package must fail the aggregated gate')
+    assert.match(drifted.stdout, /recursive scan: 2 plugin package\(s\), RED/)
+
+    // 5) 重新 --write 复原 → 聚合绿
+    const healed = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo, '--write', '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(healed.status, 0, `${healed.stdout}\n${healed.stderr}`)
+    const rechecked = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo, '--check', '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(rechecked.status, 0, `${rechecked.stdout}\n${rechecked.stderr}`)
+
+    // 6) 已提交契约的 --recursive verify：逐包读包内 coupling.json（标签为包相对路径）
+    const committed = spawnSync(process.execPath, [repoCli, 'verify', '--repo', monorepo, '--recursive'], {
+      encoding: 'utf8', timeout: 120_000,
+    })
+    assert.equal(committed.status, 0, `${committed.stdout}\n${committed.stderr}`)
+    assert.match(committed.stdout, /packages\/alpha: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+    assert.match(committed.stdout, /packages\/beta: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+  } finally {
+    rmSync(monorepo, { recursive: true, force: true })
+  }
+})
