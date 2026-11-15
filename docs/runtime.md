@@ -1,6 +1,6 @@
 # 使用说明与 v1 记录协议
 
-版本：0.1.0。更新日期：2026-11-06。
+包版本：0.2.1（记录协议 schema v1）。更新日期：2026-11-15。
 
 ## 已实现的范围
 
@@ -8,9 +8,10 @@
 它不改写原生 Session 日志，不修改工具参数/结果，不向模型添加消息，不上传数据。
 查询层按精确 ID 连接证据，输出来源、消息阶段和覆盖缺口。
 
-已验证 Harness `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`，其包版本为 `0.2.2-rc.1`。
-包声明、验证基线与重验流程见 [版本与验证策略](versioning.md)；当前基线为
-`0.2.2-rc.1` 的 2026-11-10 重发布内容（同名重发布已实际发生，首发内容不可寻址）。
+上游契约按 Harness `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`（其包版本 `0.2.2-rc.1`）核对；
+依赖安装列车与验证基线为 `0.2.2-rc.3`（`baseline.json`，2026-11-13 重验；该列车的源码提交未留存）。
+包声明、基线与重验流程见 [版本与验证策略](versioning.md)；rc.1 的同版本重发布已实际发生，
+其首发内容不可寻址，因此基线锚定的是安装内容而非版本号。
 
 ## 安装与配置
 
@@ -20,11 +21,14 @@
 npm run link:harness -- /path/to/deepseek-harness
 npm run check
 npm pack
-dsh plugin --profile headless add ./dsh-log-enhance-0.1.0.tgz
+dsh plugin --profile headless add ./dsh-log-enhance-0.2.1.tgz
 ```
 
 `link:harness` 只在本项目的 node_modules 内创建链接；不会执行 Harness 构建、修改其代码或配置。
-Harness 的准备步骤以其自身文档为准。项目当前没有发布到 npm registry。
+Harness 的准备步骤以其自身文档为准。`dsh-log-enhance@0.2.1` 已于 2026-11-15 发布到
+npm registry（`latest`），可用 `npm view dsh-log-enhance version` 复核；首次发布产生的
+`0.0.0-stage` 是 registry 的 stub 占位版本，不参与版本比较。若 registry 上无该包，
+只能用本地 tarball 安装，DSH 插件页也不会提供更新检查（见 README「通过 DSH 插件页面升级」）。
 
 建链前会跑三层审计，**全部只告警、不失败**——开发者可能有意探测旧 checkout：
 

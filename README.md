@@ -5,10 +5,10 @@
 项目以 DSH 的事件日志为基础，捕获可验证的运行时事实，保存来源关系，供查询、回放、
 协作分析和可观测平台使用。首个落地点是把一次 `send_message` 工具调用与接收方的具体消息关联起来。
 
-当前状态：**0.2.0**。在 0.1.0 采集能力之上新增只读 MCP 分析服务
+当前状态：**0.2.1**。在 0.1.0 采集能力之上新增只读 MCP 分析服务
 （七个查询工具，可挂载宿主或独立运行，见 [docs/mcp.md](docs/mcp.md)）。
-版本声明与验证基线见 [docs/versioning.md](docs/versioning.md)（当前基线 `0.2.2-rc.1`，
-2026-11-10 重验）。更新日期：2026-11-10。
+版本声明与验证基线见 [docs/versioning.md](docs/versioning.md)（当前基线 `0.2.2-rc.3`，
+2026-11-13 重验）。更新日期：2026-11-15。
 
 ## 构建与使用
 
@@ -23,8 +23,11 @@ npm pack
 将本地包加入需要启用的 DSH profile，bundle patch 会注册插件：
 
 ```sh
-dsh plugin --profile headless add ./dsh-log-enhance-0.1.0.tgz
+dsh plugin --profile headless add ./dsh-log-enhance-0.2.1.tgz
 ```
+
+上例是本地开发用的 tarball；要让 DSH 桌面端插件页出现"可更新 / 更新到"，必须改为
+registry 依赖，见下节。
 
 默认在宿主启动目录的 `.dsh-log-enhance/` 写入独立 JSONL 文件。建议在 profile patch 中将
 `directory` 设置成明确的持久目录。查询不需要启动 DSH，也不调用模型：
@@ -35,6 +38,36 @@ node dist/cli.js query /path/to/.dsh-log-enhance
 
 输出包含接收消息、来源调用、已观察阶段、证据 ID 和覆盖缺口。只有明确匹配才标记 `linked`；
 回执缺失为 `unknown`，存在多个候选为 `ambiguous`。配置、协议与限制见 [使用说明](docs/runtime.md)。
+
+## 通过 DSH 插件页面升级
+
+DSH 桌面端插件页的"可更新 / 更新到"只覆盖**从 registry 安装**的第三方组合包
+（Host 标记 `update: 'registry'`）；本地 `file:` tarball 与 `link:` 依赖不参与版本检查，
+页面不会显示更新按钮。要走这条通道，需要两处准备：
+
+1. **发布到 registry**（维护者执行；`prepack` 会先构建 `dist/`）：
+
+   ```sh
+   npm publish --tag latest
+   ```
+
+   0.2.1 已于 2026-11-15 发布，`dist-tag latest` 指向 0.2.1；后续发版沿用上式。
+   目标版本须声明 `dsh.bundle`、`engines.dsh` 覆盖当前 DSH、未弃用且非预发布，
+   页面才会把它列为可更新目标。
+
+2. **profile 依赖使用 registry spec**，而不是本地 tarball：
+
+   ```sh
+   dsh plugin --profile desktop add dsh-log-enhance@<installed-version>
+   ```
+
+   之后发布新版本，在插件页点**刷新**，卡片出现**可更新**，详情页点**更新**即可。
+   Host 内部按"移除已安装版本 → 安装目标版本"执行；目标被拒或安装失败时保留／装回
+   已安装版本。页面没有版本选择器，更新目标由 registry 查询结果决定。
+
+当前 `dsh-log-enhance@0.2.1` 已发布到 npmjs（`latest`）。首次发布时 registry 会生成
+`0.0.0-stage` 占位版本（`stub: true`，不在 `latest` 上），不参与页面的版本比较。
+若包未发布到 registry，则只能按上节用本地 tarball 安装，页面不提供更新检查。
 
 ## MCP 分析服务
 

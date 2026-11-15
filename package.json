@@ -1,6 +1,6 @@
 {
   "name": "dsh-log-enhance",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Structured runtime evidence and message provenance for DeepSeek Harness logs",
   "type": "module",
   "main": "./dist/index.js",
@@ -34,6 +34,9 @@
   "packageManager": "npm@11.9.0",
   "author": "YMOOSE <42179813+YMoose@users.noreply.github.com>",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/YMoose/dsh-log-enhance.git"
