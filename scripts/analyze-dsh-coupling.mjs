@@ -453,25 +453,31 @@ const EQUALITY = new Set([
   ts.SyntaxKind.ExclamationEqualsEqualsToken,
 ])
 
-/** `a.b?.c` → `{ base: 'a', segments: ['b', 'c'], dotted: ['.b', '?.c'], hasCast }`; anything else → null. */
+/** `a.b?.c` → `{ base: 'a', segments: ['b', 'c'], dotted: ['.b', '?.c'], hasCast, hasOptional, hasNonNull }`; anything else → null. */
 function chainOf(node) {
   const segments = []
   const dotted = []
   let hasCast = false
+  let hasOptional = false
+  let hasNonNull = false
   let cursor = node
   for (;;) {
     while (ts.isParenthesizedExpression(cursor) || ts.isAsExpression(cursor)
       || ts.isTypeAssertionExpression(cursor) || ts.isNonNullExpression(cursor)
       || ts.isSatisfiesExpression(cursor)) {
       if (ts.isAsExpression(cursor) || ts.isTypeAssertionExpression(cursor)) hasCast = true
+      if (ts.isNonNullExpression(cursor)) hasNonNull = true
       cursor = cursor.expression
     }
     if (!ts.isPropertyAccessExpression(cursor)) break
     segments.unshift(cursor.name.text)
+    if (cursor.questionDotToken !== undefined) hasOptional = true
     dotted.unshift(`${cursor.questionDotToken !== undefined ? '?.' : '.'}${cursor.name.text}`)
     cursor = cursor.expression
   }
-  return ts.isIdentifier(cursor) ? { base: cursor.text, segments, dotted, hasCast } : null
+  return ts.isIdentifier(cursor)
+    ? { base: cursor.text, segments, dotted, hasCast, hasOptional, hasNonNull }
+    : null
 }
 
 /** `arr ?? []` / `arr || []` → `arr`, so a `for…of` alias keeps its source chain. */
@@ -536,14 +542,18 @@ function analyzeFile(path, root, state) {
    * runs under. `guards` are recorded as source-text expressions
    * (`{ expr, kind: 'eq'|'ne'|'defined'|'falsy', literal? }`); `loop` carries
    * a `for…of` element binding (`{ binding, elementOf }`) for reads through
-   * the loop variable.
+   * the loop variable. `pin` marks a bare value read (原则 6-2): no `?.`,
+   * no `!`, no cast, no null-aware use anywhere in sight — the probe will
+   * assert the path is currently non-null. It merges sticky: once a
+   * (path, site) record is seen tolerant from any recording, it stays
+   * unpinned.
    */
-  const recordFieldPath = (key, fieldPath, rootType, site, guards = [], loop = null) => {
+  const recordFieldPath = (key, fieldPath, rootType, site, guards = [], loop = null, pin = false) => {
     const bucket = state.fieldPaths[key] ?? new Map()
     const entry = bucket.get(fieldPath) ?? { rootTypes: new Set(), accesses: new Map() }
     entry.rootTypes.add(rootType)
     const guardId = guard => `${guard.expr}|${guard.kind}|${guard.literal ?? ''}`
-    const access = entry.accesses.get(site) ?? { site, guards: [] }
+    const access = entry.accesses.get(site) ?? { site, guards: [], pin: true }
     const seen = new Set(access.guards.map(guardId))
     for (const guard of guards) {
       if (seen.has(guardId(guard))) continue
@@ -554,6 +564,7 @@ function analyzeFile(path, root, state) {
       access.elementOf = loop.elementOf
       access.binding = loop.binding
     }
+    access.pin = access.pin && pin
     entry.accesses.set(site, access)
     bucket.set(fieldPath, entry)
     state.fieldPaths[key] = bucket
@@ -631,6 +642,29 @@ function analyzeFile(path, root, state) {
         rootType: info.rootType,
         segments: [...info.segments, ...chain.segments],
         expr: `${info.exprPrefix}${chain.dotted.join('')}`,
+        hasOptional: chain.hasOptional,
+        hasNonNull: chain.hasNonNull,
+        hasCast: chain.hasCast,
+      }
+    }
+
+    /** 别名捕获点：`const tag = app.session.note` 的裸链读取。若该别名后来
+     *  以空值感知方式使用（守卫 / `?.` / `!` / `??`），捕获点读取就不钉非空。 */
+    const aliasOrigins = new Map()
+    const toleratedAliases = new Set()
+    const noteNullAwareExpr = expr => {
+      for (const [name, origin] of aliasOrigins) {
+        if (origin.expr === expr) toleratedAliases.add(name)
+      }
+    }
+    const noteNullAwareBase = node => {
+      const chain = chainOf(node)
+      if (chain !== null && aliasOrigins.has(chain.base)) toleratedAliases.add(chain.base)
+    }
+    /** 守卫（defined/falsy）证明其表达式被空值感知地检查过。 */
+    const noteGuardTolerance = guards => {
+      for (const guard of guards ?? []) {
+        if (guard.kind === 'defined' || guard.kind === 'falsy') noteNullAwareExpr(guard.expr)
       }
     }
 
@@ -642,7 +676,18 @@ function analyzeFile(path, root, state) {
         const varAnnotation = current.type === undefined ? null : current.type.getText(source)
         if (varAnnotation === null || packagesOfAnnotation(varAnnotation).size > 0) {
           const info = resolve(current.initializer)
-          if (info !== null) tracked.set(current.name.text, { ...info, exprPrefix: info.expr })
+          if (info !== null) {
+            tracked.set(current.name.text, { ...info, exprPrefix: info.expr })
+            const init = unwrap(current.initializer)
+            if (ts.isPropertyAccessExpression(init) && !info.hasOptional && !info.hasNonNull) {
+              aliasOrigins.set(current.name.text, {
+                keys: info.keys,
+                path: info.segments.join('.'),
+                site: siteOf(init),
+                expr: info.expr,
+              })
+            }
+          }
         }
       }
       if (ts.isForOfStatement(current) && ts.isVariableDeclarationList(current.initializer)) {
@@ -770,8 +815,12 @@ function analyzeFile(path, root, state) {
     const walk = (current, scope) => {
       if (ts.isBlock(current)) return walkStatements(current.statements, scope)
       if (ts.isIfStatement(current)) {
-        walk(current.expression, scope) // the condition's reads carry the outer scope only
+        // 条件子树里的读取是"测试"而非"值使用"——比较/判空不会因可空而崩溃，
+        // 不参与非空钉（原则 6-2 的另一半：对合法代码不误报）。
+        walk(current.expression, { ...scope, tolerant: true }) // the condition's reads carry the outer scope only
         const { positive, negative } = conditionOf(current.expression)
+        noteGuardTolerance(positive)
+        noteGuardTolerance(negative)
         walk(current.thenStatement,
           positive === null ? scope : { ...scope, guards: mergeGuards(scope.guards, positive) })
         if (current.elseStatement !== undefined) {
@@ -821,6 +870,40 @@ function analyzeFile(path, root, state) {
         walk(current.statement, scope)
         return
       }
+      // 空值感知位置：条件（while/do/三元）、`!x`、`typeof x` 与 `x!` 的内部
+      // 读取都不会因可空而崩溃——不钉非空；`x!` 同时把责任显式归于源码。
+      if (ts.isWhileStatement(current) || ts.isDoStatement(current)) {
+        walk(current.expression, { ...scope, tolerant: true })
+        walk(current.statement, scope)
+        return
+      }
+      if (ts.isConditionalExpression(current)) {
+        walk(current.condition, { ...scope, tolerant: true })
+        walk(current.whenTrue, scope)
+        walk(current.whenFalse, scope)
+        return
+      }
+      if (ts.isNonNullExpression(current)) {
+        noteNullAwareBase(current.expression)
+        walk(current.expression, { ...scope, tolerant: true })
+        return
+      }
+      // cast（as / 尖括号断言 / satisfies）与 `!` 同级：作者自己的类型声明，
+      // 内部的裸读不钉非空（r8 实测 dsh-ops `context.scope as Agent`、
+      // `exec.arguments as {...} | undefined` 被误钉）。守卫仍照常记录。
+      if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)
+        || ts.isSatisfiesExpression(current)) {
+        walk(current.expression, { ...scope, tolerant: true })
+        return
+      }
+      if (ts.isTypeOfExpression(current)) {
+        walk(current.expression, { ...scope, tolerant: true })
+        return
+      }
+      if (ts.isPrefixUnaryExpression(current) && current.operator === ts.SyntaxKind.ExclamationToken) {
+        walk(current.operand, { ...scope, tolerant: true })
+        return
+      }
       // event.type === 'x' / 'x' !== source.kind — a discriminant comparison.
       if (ts.isBinaryExpression(current) && EQUALITY.has(current.operatorToken.kind)) {
         for (const [left, right] of [[current.left, current.right], [current.right, current.left]]) {
@@ -831,20 +914,59 @@ function analyzeFile(path, root, state) {
           recordDiscriminantHit(target, literal.text, current, scope)
         }
       }
+      if (ts.isBinaryExpression(current)) {
+        const operator = current.operatorToken.kind
+        // `a ?? b` / `a || b` / `a && b` 的左操作数是空值感知的测试；`&&` 的
+        // 右侧在左侧为真时运行，携带与 `if` 相同的收窄。
+        if (operator === ts.SyntaxKind.QuestionQuestionToken
+          || operator === ts.SyntaxKind.BarBarToken
+          || operator === ts.SyntaxKind.AmpersandAmpersandToken) {
+          walk(current.left, { ...scope, tolerant: true })
+          if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
+            const { positive } = conditionOf(current.left)
+            walk(current.right, positive === null ? scope
+              : { ...scope, guards: mergeGuards(scope.guards, positive) })
+          } else {
+            walk(current.right, scope)
+          }
+          return
+        }
+        // 相等比较的操作数是测试读取（比较不会因可空崩溃）。
+        if (EQUALITY.has(operator)) {
+          walk(current.left, { ...scope, tolerant: true })
+          walk(current.right, { ...scope, tolerant: true })
+          return
+        }
+      }
       if (ts.isPropertyAccessExpression(current)) {
         const target = resolve(current)
         if (target !== null) {
-          // An optional link (`exec.agent?.id`) narrows its own prefix.
+          // An optional link (`exec.agent?.id`) narrows its own prefix; the
+          // prefix's own bare record must carry that guard too (and stay
+          // unpinned), or `agent` would be pinned despite the source's `?.`.
           const optional = []
           for (let link = current; ts.isPropertyAccessExpression(link); link = unwrap(link.expression)) {
             if (link.questionDotToken !== undefined) {
               const prefix = resolve(link.expression)
-              if (prefix !== null) optional.push({ expr: prefix.expr, kind: 'defined' })
+              if (prefix !== null) {
+                optional.push({ expr: prefix.expr, kind: 'defined' })
+                noteNullAwareExpr(prefix.expr)
+                for (const key of prefix.keys) {
+                  recordFieldPath(key, prefix.segments.join('.'), prefix.rootType, siteOf(link),
+                    [{ expr: prefix.expr, kind: 'defined' }], scope.loop, false)
+                }
+              }
             }
           }
           const guards = mergeGuards(scope.guards, optional)
+          // 原则 6-2：裸值读取（值位置、无 `?.`、无 `!`、无 cast、非空值感知
+          // 上下文）记录非空钉——上游把该字段变可空时探针必须编译报错。
+          // 链内 cast（如 `(ctx.agent as Agent).id`）与 `!` 同为作者类型声明，
+          // 不钉。
+          const pin = scope.tolerant !== true && !target.hasOptional && !target.hasNonNull && !target.hasCast
+          if (scope.tolerant === true) noteNullAwareBase(current)
           for (const key of target.keys) {
-            recordFieldPath(key, target.segments.join('.'), target.rootType, siteOf(current), guards, scope.loop)
+            recordFieldPath(key, target.segments.join('.'), target.rootType, siteOf(current), guards, scope.loop, pin)
           }
         }
       }
@@ -860,11 +982,24 @@ function analyzeFile(path, root, state) {
         walk(statement, { ...scope, guards: mergeGuards(scope.guards, carried) })
         if (ts.isIfStatement(statement)) {
           const { negative } = conditionOf(statement.expression)
-          if (negative !== null && terminates(statement.thenStatement)) carried = mergeGuards(carried, negative)
+          if (negative !== null && terminates(statement.thenStatement)) {
+            noteGuardTolerance(negative)
+            carried = mergeGuards(carried, negative)
+          }
         }
       }
     }
     walk(node.body, { guards: [], loop: null })
+    // 捕获点回写：别名在函数内任何空值感知使用（守卫 / `?.` / `!` / `??` /
+    // 测试位置读取）都把它的捕获点读取降级为不钉非空——源码已声明容忍。
+    for (const name of toleratedAliases) {
+      const origin = aliasOrigins.get(name)
+      if (origin === undefined) continue
+      for (const key of origin.keys) {
+        const access = state.fieldPaths[key]?.get(origin.path)?.accesses.get(origin.site)
+        if (access !== undefined) access.pin = false
+      }
+    }
   }
 
   // A `ctx.on` callback is analyzed once, with its event name; visit() below
@@ -1445,7 +1580,9 @@ function acknowledgementMatcher(raw) {
 
 async function loadRegistry() {
   if (!existsSync(REGISTRY_PATH)) {
-    return { seams: [], specifications: [], error: `missing ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}` }
+    // Level 1（origin 原则 4）：注册表是 Level 2 工件——缺失不是损坏，而是
+    // 尚未接入隐含依赖审计。门禁按级别路由；损坏（存在但不可加载）仍判红。
+    return { seams: [], specifications: [], error: null, missing: true }
   }
   try {
     // Node ≥ 22.18 / 24 strips the types in place; the file has no runtime deps.
@@ -1455,35 +1592,52 @@ async function loadRegistry() {
       ...(seam.acknowledged ?? []).map(raw => ({ seam: seam.id, effect: 'acknowledged', ...acknowledgementMatcher(raw) })),
       ...(seam.ignored ?? []).map(raw => ({ seam: seam.id, effect: 'ignored', ...acknowledgementMatcher(raw) })),
     ])
-    return { seams, specifications, error: null }
+    return { seams, specifications, error: null, missing: false }
   } catch (error) {
-    return { seams: [], specifications: [], error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}: ${String(error)}` }
+    return { seams: [], specifications: [], error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}: ${String(error)}`, missing: false }
   }
 }
 
 /**
  * Compare the scanned suspects with the registry. Returns the report text
- * plus what the `--check` gate rules on: a suspect shape that no seam
- * acknowledges (and no entry ignores) FAILS the gate, and so does a registry
+ * plus what the `--check` gate rules on. With a registry present (Level 2
+ * active), a suspect shape no seam acknowledges FAILS, and so does a registry
  * that cannot be loaded — an unverifiable report must never read as "all
- * acknowledged".
+ * acknowledged". With the registry absent (`missing`, Level 1), the audit is
+ * inactive: suspects are still listed by name (原则 6-2 transparency) but the
+ * gate does not rule on them (原则 4 proportionality — Level 1 commits only
+ * coupling.json).
  */
 function suspectSection(suspects, registry) {
   const lines = []
-  const unaccounted = suspects.filter(suspect =>
-    !registry.specifications.some(specification => specification.match(suspect)))
+  const unaccounted = registry.missing
+    ? suspects
+    : suspects.filter(suspect =>
+      !registry.specifications.some(specification => specification.match(suspect)))
 
   lines.push(`## 层 2 · 隐性契约嫌疑扫描（src ${suspects.length} 处嫌疑）`)
   lines.push('')
-  lines.push('代码形状由 `scripts/analyze-dsh-coupling.mjs` 提取；每处嫌疑必须在 '
-    + '`tests/contracts/implicit-seams.ts` 里绑定到一条隐性契约，或标为 internal。'
-    + '`--check` 模式下未报备（或清单不可读）直接判红；默认模式仅打印草表。')
+  lines.push('代码形状由 `scripts/analyze-dsh-coupling.mjs` 提取。`--check` 模式下：'
+    + '已接入审计（存在 `tests/contracts/implicit-seams.ts`）时，未报备的嫌疑或不可读的清单直接判红；'
+    + '未接入（Level 1，清单缺失）时嫌疑仅具名列出、不判红。默认模式仅打印草表。')
   lines.push('')
+
+  if (registry.missing) {
+    lines.push('ℹ️  未找到 tests/contracts/implicit-seams.ts —— 隐含依赖审计未接入（Level 1）。')
+    if (suspects.length > 0) {
+      lines.push(`⚠️  以下 ${suspects.length} 处嫌疑在 Level 1 下仅为报告、不判红；接入 Level 2（dsh-seam sync）后必须逐条绑定：`)
+      suspects.forEach((suspect, index) => {
+        lines.push(`  ${index + 1}. [${suspect.kind}] ${suspect.file}:${suspect.line} — ${suspect.symbol}`)
+      })
+    }
+    lines.push('')
+    return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: null, inactive: true }
+  }
 
   if (registry.error !== null) {
     lines.push(`⚠️  无法读取隐性契约清单：${registry.error}`)
     lines.push('')
-    return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: registry.error }
+    return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: registry.error, inactive: false }
   }
 
   const acknowledged = registry.specifications.filter(specification => specification.effect === 'acknowledged')
@@ -1511,7 +1665,7 @@ function suspectSection(suspects, registry) {
   }
 
   lines.push('')
-  return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: null }
+  return { text: lines.join('\n'), unaccounted: unaccounted.length, registryError: null, inactive: false }
 }
 
 // --- orchestration --------------------------------------------------------------
@@ -1725,8 +1879,14 @@ function canonical() {
         accesses: [...entry.accesses.values()]
           .sort((a, b) => bySite(a.site, b.site))
           .map(access => access.elementOf === undefined
-            ? { site: access.site, guards: access.guards }
-            : { site: access.site, guards: access.guards, elementOf: access.elementOf, binding: access.binding }),
+            ? { site: access.site, guards: access.guards, ...(access.pin === true ? { pin: true } : {}) }
+            : {
+              site: access.site,
+              guards: access.guards,
+              ...(access.pin === true ? { pin: true } : {}),
+              elementOf: access.elementOf,
+              binding: access.binding,
+            }),
       }
     }
     fieldPaths[key] = paths
@@ -1912,19 +2072,24 @@ if (MODE === 'write') {
     console.error('若是有意的耦合变更：review 默认模式的草表后 --write 固化；否则这是意外耦合，先改代码。')
   }
 
-  // Implicit-contract suspect gate: every suspect shape must be bound to a
-  // seam or explicitly ignored, and the registry must be loadable at all.
-  // Printed even when the drift gate above failed, so one run shows both.
+  // Implicit-contract suspect gate, routed by level (origin 原则 4): with a
+  // registry present (Level 2) every suspect shape must be bound to a seam or
+  // explicitly ignored, and the registry must be loadable at all. With the
+  // registry absent (Level 1) the audit is inactive — suspects are printed
+  // above, by name, but do not fail the gate. Printed even when the drift gate
+  // failed, so one run shows both.
   const suspects = implicitSuspects()
   const registry = await loadRegistry()
   const suspectReport = suspectSection(suspects, registry)
   console.log('')
   console.log(suspectReport.text)
-  if (suspectReport.registryError !== null) {
+  if (suspectReport.inactive === true) {
+    console.log('NOTE implicit-contract audit inactive (no seam registry): '
+      + `${suspects.length} suspect(s) listed above are advisory at Level 1 — bind them via Level 2 (dsh-seam sync) to gate`)
+  } else if (suspectReport.registryError !== null) {
     console.error(`FAIL cannot verify implicit-contract suspects: ${suspectReport.registryError}`)
     process.exit(1)
-  }
-  if (suspectReport.unaccounted > 0) {
+  } else if (suspectReport.unaccounted > 0) {
     console.error(`FAIL ${suspectReport.unaccounted} unacknowledged implicit-contract suspect(s) listed above — ` +
       'bind each to a seam in tests/contracts/implicit-seams.ts or mark it internal')
     process.exit(1)

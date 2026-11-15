@@ -403,11 +403,13 @@
                 "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/index.ts:111",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -421,19 +423,23 @@
                 "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/index.ts:100",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:107",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:116",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -447,7 +453,8 @@
                 "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -456,15 +463,18 @@
         "accesses": [
           {
             "site": "src/index.ts:100",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:107",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:116",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -487,7 +497,8 @@
                 "expr": "ctx.mcpManager",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -496,27 +507,33 @@
         "accesses": [
           {
             "site": "src/index.ts:119",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:120",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:124",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:125",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:128",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/index.ts:131",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       }
@@ -527,11 +544,13 @@
         "accesses": [
           {
             "site": "src/observer.ts:180",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/observer.ts:191",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -540,15 +559,18 @@
         "accesses": [
           {
             "site": "src/observer.ts:167",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/observer.ts:175",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/observer.ts:188",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       }
@@ -580,7 +602,8 @@
                 "kind": "eq",
                 "literal": "send_message"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:107",
@@ -590,7 +613,8 @@
                 "kind": "eq",
                 "literal": "step/start"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:111",
@@ -600,7 +624,8 @@
                 "kind": "eq",
                 "literal": "agent/inbox/spliced"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:121",
@@ -630,7 +655,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:125",
@@ -670,7 +696,8 @@
                 "kind": "eq",
                 "literal": "send_message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -695,7 +722,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -710,7 +738,8 @@
                 "kind": "eq",
                 "literal": "agent/inbox/spliced"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -731,6 +760,7 @@
                 "literal": "agent-message"
               }
             ],
+            "pin": true,
             "elementOf": "event.data.inserted",
             "binding": "message"
           },
@@ -748,6 +778,7 @@
                 "literal": "agent-message"
               }
             ],
+            "pin": true,
             "elementOf": "event.data.inserted",
             "binding": "message"
           }
@@ -782,6 +813,7 @@
                 "literal": "agent-message"
               }
             ],
+            "pin": true,
             "elementOf": "event.data.inserted",
             "binding": "message"
           }
@@ -821,6 +853,7 @@
                 "literal": "agent-message"
               }
             ],
+            "pin": true,
             "elementOf": "event.data.inserted",
             "binding": "message"
           }
@@ -932,7 +965,8 @@
                 "kind": "eq",
                 "literal": "send_message"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:107",
@@ -942,7 +976,8 @@
                 "kind": "eq",
                 "literal": "step/start"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -962,7 +997,8 @@
                 "kind": "eq",
                 "literal": "send_message"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:107",
@@ -972,7 +1008,8 @@
                 "kind": "eq",
                 "literal": "step/start"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -990,7 +1027,8 @@
         "accesses": [
           {
             "site": "src/observer.ts:82",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -999,7 +1037,8 @@
         "accesses": [
           {
             "site": "src/observer.ts:82",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       },
@@ -1008,7 +1047,8 @@
         "accesses": [
           {
             "site": "src/observer.ts:82",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/observer.ts:126",
@@ -1028,7 +1068,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -1046,7 +1087,8 @@
         "accesses": [
           {
             "site": "src/observer.ts:82",
-            "guards": []
+            "guards": [],
+            "pin": true
           },
           {
             "site": "src/observer.ts:94",
@@ -1089,7 +1131,8 @@
         "accesses": [
           {
             "site": "src/observer.ts:97",
-            "guards": []
+            "guards": [],
+            "pin": true
           }
         ]
       }
@@ -1114,7 +1157,8 @@
                 "expr": "exec.agent",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:142",
@@ -1128,11 +1172,16 @@
                 "expr": "exec.agent",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:152",
             "guards": [
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              },
               {
                 "expr": "exec.name",
                 "kind": "eq",
@@ -1147,6 +1196,10 @@
           {
             "site": "src/observer.ts:155",
             "guards": [
+              {
+                "expr": "exec.agent",
+                "kind": "defined"
+              },
               {
                 "expr": "exec.name",
                 "kind": "eq",
@@ -1171,7 +1224,8 @@
                 "expr": "exec.agent",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           },
           {
             "site": "src/observer.ts:152",
@@ -1222,7 +1276,8 @@
                 "expr": "exec.agent",
                 "kind": "defined"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -1340,7 +1395,8 @@
                 "expr": "result.isError",
                 "kind": "falsy"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -1376,7 +1432,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -1411,7 +1468,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },
@@ -1446,7 +1504,8 @@
                 "kind": "eq",
                 "literal": "agent-message"
               }
-            ]
+            ],
+            "pin": true
           }
         ]
       },

@@ -94,45 +94,12 @@ for (const argument of files) {
   }
   const coupling = JSON.parse(readFileSync(resolve(process.cwd(), argument), 'utf8'))
   const specs = probeSpecsFromCoupling(coupling)
-  const ctxHosts = new Set(Object.entries(coupling.fieldPaths ?? {}).filter(([, p]) => Object.values(p ?? {}).some(r => r?.rootType === 'Context')).map(([pkg]) => pkg))
-  const borrowedSet = new Set(coupling.borrowed ?? [])
-  const injected = new Set(coupling.injectedServices ?? [])
-  const isContextMissingProp = problem => /^TS2339: Property '[^']+' does not exist on type 'Context'\./.test(problem)
-  /** The property a TS2339-on-Context diagnostic actually names, if any. */
-  const missingContextProp = problem => /^TS2339: Property '([^']+)' does not exist on type 'Context'\./.exec(problem)?.[1]
-  const classifyFailure = (id, problems) => {
+  /** Display name of a segment id: `pkg::path`（去掉 site 后缀与类别前缀）。 */
+  const surfaceName = id => {
     const surface = id.replace(/^(?:field|discriminant):/, '')
     const separator = surface.lastIndexOf('::')
     const bare = (surface.slice(separator + 2).split('@')[0] ?? '')
-    const firstSegment = bare.split('.')[0] ?? ''
-    const serviceName = firstSegment.replace(/\[\]$/, '')
-    const name = `${surface.slice(0, separator)}::${bare}`
-    if (ctxHosts.has(surface.slice(0, separator)) && serviceName.length > 0
-      && problems.length > 0 && problems.every(isContextMissingProp)) {
-      // The property named inside the diagnostic is authoritative. A probe
-      // may replay a guard over a BORROWED runtime service (e.g.
-      // `if (ctx.mcpManager === undefined) return` ahead of an anchored
-      // access that flow-analysis proved conditional on it); its TS2339
-      // names the borrowed property, not the surface. Route by the named
-      // properties: all borrowed -> borrowed; any unregistered name ->
-      // genuine anchored->borrowed regression, reported against that name.
-      const namedProps = problems.map(missingContextProp).filter(prop => prop !== undefined)
-      const suspects = namedProps.length > 0 ? namedProps : [serviceName]
-      if (suspects.every(prop => borrowedSet.has(prop))) {
-        return { kind: 'borrowed', name, signed: suspects.some(prop => injected.has(prop)), reason: 'TS2339' }
-      }
-      return { kind: 'regression', name, serviceName: suspects.find(prop => !borrowedSet.has(prop)) ?? serviceName }
-    }
-    // Opaque JsonValue reads are the ONLY tolerated TS18047s: the TS18047
-    // text ("'x' is possibly 'null'") never names the type, so a bare
-    // TS18047 is tolerated only when the SAME surface also carries
-    // TS2339-on-JsonValue evidence. A nullable read anywhere else — e.g. an
-    // upstream making a member `T | null` — must FAIL, not exempt.
-    const jsonEvidence = problem => /^TS2339:.*JsonValue/.test(problem)
-    if (problems.some(jsonEvidence)
-      && problems.every(problem => /^TS18047:/.test(problem) || jsonEvidence(problem)))
-      return { kind: 'exempt', name, reason: 'opaque JsonValue read (TS18047/TS2339)' }
-    return undefined
+    return `${surface.slice(0, separator)}::${bare}`
   }
   const { outcome } = checkContract({
     root, coupling, fieldSpecs: specs.fieldSpecs, discriminantSpecs: specs.discriminantSpecs,
@@ -168,14 +135,17 @@ for (const argument of files) {
   for (const segment of outcome.segments) {
     if (segment.problems.length === 0) verdict.pass += 1
     else {
-      const classified = classifyFailure(segment.id, segment.problems)
-      if (classified?.kind === 'borrowed') {
-        const key = `${classified.name}::${classified.signed ? 'signed' : 'unsigned'}`
-        recordDiagnostic(borrowedBySurface, key, classified)
-      } else if (classified?.kind === 'exempt') {
-        recordDiagnostic(exemptedBySurface, classified.name, classified)
-      } else if (classified?.kind === 'regression') {
-        report.push(`[anchored -> borrowed] ${classified.name} — '${classified.serviceName}' was anchored in coupling.json but is now missing on Context\n    ${segment.problems.join('\n    ')}`)
+      // 借用/退化/豁免的判定由引擎 checkContract 单一计算（SegmentDisposition）；
+      // 本脚本只做展示与计数——规则不再有两份实现。
+      const disposition = segment.disposition
+      const name = surfaceName(segment.id)
+      if (disposition?.kind === 'borrowed') {
+        recordDiagnostic(borrowedBySurface, `${name}::${disposition.signed ? 'signed' : 'unsigned'}`,
+          { name, ...disposition, reason: 'TS2339' })
+      } else if (disposition?.kind === 'exempt') {
+        recordDiagnostic(exemptedBySurface, name, { name, ...disposition })
+      } else if (disposition?.kind === 'regression') {
+        report.push(`[anchored -> borrowed] ${name} — '${disposition.prop}' was anchored in coupling.json but is now missing on Context\n    ${segment.problems.join('\n    ')}`)
       } else {
         report.push(`${segment.title}\n    ${segment.problems.join('\n    ')}`)
       }

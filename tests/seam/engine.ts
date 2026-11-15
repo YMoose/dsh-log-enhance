@@ -60,6 +60,10 @@ export interface Guard {
 export interface AccessRecord {
   readonly site: string
   readonly guards: readonly Guard[]
+  /** 裸值读取（无 `?.` / `!` / cast / 空值守卫，值位置）——探针以 `Exclude`
+   *  赋值断言该路径当前非空（原则 6-2：非空变可空必须报编译错误）。
+   *  缺省（旧契约）= 不钉，行为与历史版本一致。 */
+  readonly pin?: boolean
   /** `for…of` 元素读取：被遍历表达式与循环变量名。 */
   readonly elementOf?: string
   readonly binding?: string
@@ -115,6 +119,8 @@ export interface ProbeSpec {
   }
   /** 被验证的字段访问表达式。 */
   readonly access: string
+  /** 非空钉（原则 6-2）：裸值读取以 `Exclude` 赋值断言当前非空。 */
+  readonly pin?: boolean
   /** 自动生成时该规格对应的访问点（手写 override 没有）。 */
   readonly site?: string
   /** 该访问点的类型收窄条件，按源码顺序（用于标题摘要；prelude 只回放与检查代码参数同根的类型收窄条件）。 */
@@ -400,6 +406,7 @@ function buildProbeSpec(
       access: rest === '' ? access.binding : `${access.binding}.${rest}`,
       site: access.site,
       guards: access.guards,
+      ...(access.pin === true ? { pin: true } : {}),
     }
   }
   const prelude = replayable(access.guards, parameter, explicitAlias).map(guard => `${guardLine(guard)} return`)
@@ -410,6 +417,7 @@ function buildProbeSpec(
     access: path === '' ? parameter : `${parameter}.${path}`,
     site: access.site,
     guards: access.guards,
+    ...(access.pin === true ? { pin: true } : {}),
   }
 }
 
@@ -723,21 +731,31 @@ interface Generated {
   readonly mismatched: readonly string[]
 }
 
-/** 一个字段检查代码的函数体（不含签名）。异常场景测试复用同一渲染器。 */
+/** 一个字段检查代码的函数体（不含签名）。异常场景测试复用同一渲染器。
+ *  非空钉（原则 6-2）：裸值读取后紧跟 `Exclude<…, null | undefined>` 赋值
+ *  ——字段当前类型含 `undefined`/`null` 时立即 TS2322，属性"由非空变可空"
+ *  不再静默通过；收窄守卫已在 prelude 回放完毕，守卫过的读取不会误报。
+ *  用 `Exclude` 而非 `NonNullable`：`NonNullable<T> = T & {}`，在 `unknown`
+ *  上坍缩成 `{}`（赋值必炸）——不透明类型（`unknown`/`any`）的可空性在类型
+ *  层不可见，钉非空应当是空断言而非编译错误（r8 实测 dsh-ops
+ *  `tools/post-execute :: arguments` 误报）。 */
 function probeBodyLines(spec: ProbeSpec, indent: string): string[] {
   const out: string[] = []
   for (const line of spec.prelude ?? []) out.push(`${indent}${line}`)
+  const readInto = (depth: string): string[] => [
+    `${depth}const _probe = ${spec.access}`,
+    ...(spec.pin === true ? [`${depth}const _nonnull: Exclude<typeof _probe, null | undefined> = _probe`] : []),
+    `${depth}void ${spec.pin === true ? '_nonnull' : '_probe'}`,
+  ]
   if (spec.element !== undefined) {
     const binding = spec.element.binding ?? 'item'
     out.push(`${indent}for (const ${binding} of ${spec.element.of}) {`)
     if (spec.element.guard !== undefined) out.push(`${indent}  ${spec.element.guard}`)
     for (const line of spec.element.inner ?? []) out.push(`${indent}  ${line}`)
-    out.push(`${indent}  const _probe = ${spec.access}`)
-    out.push(`${indent}  void _probe`)
+    for (const line of readInto(`${indent}  `)) out.push(line)
     out.push(`${indent}}`)
   } else {
-    out.push(`${indent}const _probe = ${spec.access}`)
-    out.push(`${indent}void _probe`)
+    for (const line of readInto(indent)) out.push(line)
   }
   return out
 }
@@ -1199,11 +1217,35 @@ function unverifiableSeamIds(exemption: UnverifiableExemption): readonly string[
 
 /** 契约层的检查结果：不注册任何测试，`runContractSuite`（测试发射）与
  *  `scripts/verify-coupling.mjs`（独立验证 CLI）共用同一份产物。 */
+/** 段级处置——引擎对"这组诊断算什么"的单一真值（verify-coupling 与套件
+ *  共同消费，规则只有这一份实现）：
+ *  - `borrowed`：全部诊断是 TS2339-on-Context 且点名的属性均已登记
+ *    `coupling.borrowed`（L3 借用面，只登记不裁决）；`signed` = 任一属性
+ *    声明了 `inject`。
+ *  - `regression`：TS2339-on-Context 点名了未登记属性——原属锚定面的
+ *    成员上游缺失，[anchored -> borrowed] 退化，判红。
+ *  - `exempt`：不透明 JsonValue 读取（TS18047 仅在同行有 TS2339-on-JsonValue
+ *    证据时豁免；类型文本从不点名，别处的 nullable 读必须红）。
+ *  套件（Level 2）对 `exempt` 不自动放行——那里必须走 `unverifiable` →
+ *  隐含依赖登记（原则 6-2：不静默豁免）；独立验证（Level 0/1，无登记表）
+ *  才接受该豁免。 */
+export type SegmentDisposition =
+  | { readonly kind: 'borrowed', readonly props: readonly string[], readonly signed: boolean }
+  | { readonly kind: 'exempt', readonly reason: string }
+  | { readonly kind: 'regression', readonly prop: string }
+
 export interface ContractOutcome {
   /** 每条生成的依赖项（含标题）；problems 非空 = 该检查代码编译失败。
    * `borrowed` 非空 = 全部问题都是 TS2339-on-Context 且点名的属性均在
-   * coupling.borrowed 登记中（L3 借用面：只登记，不裁决）。 */
-  readonly segments: ReadonlyArray<{ readonly id: string, readonly title: string, readonly problems: readonly string[], readonly borrowed?: readonly string[] }>
+   * coupling.borrowed 登记中（L3 借用面：只登记，不裁决）。
+   * `disposition` = 段级处置的完整判定（含 regression/exempt）。 */
+  readonly segments: ReadonlyArray<{
+    readonly id: string
+    readonly title: string
+    readonly problems: readonly string[]
+    readonly borrowed?: readonly string[]
+    readonly disposition?: SegmentDisposition
+  }>
   /** 未归属到任何依赖项的诊断（生成脚架自身坏了）。 */
   readonly unattributed: readonly string[]
   /** `coupling.json` 里有、但既没有检查代码也没有豁免的键。 */
@@ -1261,6 +1303,8 @@ export function checkContract(suite: SeamSuite): ContractRun {
     : { ...suite, fieldSpecs: applyOverrides(suite.fieldSpecs, suite.overrides) }
   /** L3 借用登记（coupling.borrowed）：段级借用路由的查表。 */
   const borrowedSet = new Set(effective.coupling.borrowed ?? [])
+  /** inject 声明（coupling.injectedServices）：借用是否已签名。 */
+  const injectedSet = new Set(effective.coupling.injectedServices ?? [])
   const generated = generate(effective)
   const bySeam = new Map<string, string[]>()
   const unattributed: string[] = []
@@ -1320,21 +1364,32 @@ export function checkContract(suite: SeamSuite): ContractRun {
     outcome: {
       segments: [...generated.segments.values()].map(segment => {
         const problems = bySeam.get(segment.id) ?? []
-        /** L3 借用路由：问题全部是"Context 缺某属性"且该属性已登记借用
-         *  （典型：探针回放的守卫表达式引用运行时注入服务）→ 标记借用，
-         *  由消费方（verify-coupling / 套件）只登记不裁决。未登记的属性
-         *  不标记——那是真回归，保持红。 */
+        /** 段级处置（单一真值，规则见 SegmentDisposition）。典型：探针回放的
+         *  守卫表达式引用运行时注入服务 → 其 TS2339 点名借用属性而非表面。 */
         const missingContextProp = (problem: string): string | undefined =>
           /^TS2339: Property '([^']+)' does not exist on type 'Context'\./.exec(problem)?.[1]
         const named = problems.map(missingContextProp)
         const borrowed = named.length > 0 && named.every(prop => prop !== undefined && borrowedSet.has(prop))
           ? [...new Set(named.filter((prop): prop is string => prop !== undefined))]
           : []
+        const unregistered = named.find(prop => prop !== undefined && !borrowedSet.has(prop))
+        const jsonEvidence = (problem: string): boolean => /TS2339:.*JsonValue/.test(problem)
+        const opaqueJson = problems.some(jsonEvidence)
+          && problems.every(problem => /^TS18047:/.test(problem) || jsonEvidence(problem))
+        const disposition = problems.length === 0 ? undefined
+          : borrowed.length > 0
+            ? { kind: 'borrowed', props: borrowed, signed: borrowed.some(prop => injectedSet.has(prop)) } as const
+            : unregistered !== undefined
+              ? { kind: 'regression', prop: unregistered } as const
+              : opaqueJson
+                ? { kind: 'exempt', reason: 'opaque JsonValue read (TS18047/TS2339)' } as const
+                : undefined
         return {
           id: segment.id,
           title: segment.title,
           problems,
           ...(borrowed.length > 0 ? { borrowed } : {}),
+          ...(disposition === undefined ? {} : { disposition }),
         }
       }),
       unattributed,

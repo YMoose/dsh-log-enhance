@@ -79,14 +79,25 @@ test('an unacknowledged implicit-contract suspect fails --check', () => {
   }
 })
 
-test('a seam registry that cannot be loaded fails --check even without drift', () => {
+test('Level 1 (no seam registry): --check lists suspects by name but stays green; a corrupt registry still fails', () => {
   const root = fixtureRoot('') // no tests/contracts/implicit-seams.ts at all
   try {
     const written = runScript(['--write'], root)
     assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    // 原则 4 proportionality: Level 1 commits only coupling.json — the
+    // implicit audit is Level 2 protection, so its gate must not fire.
+    // 原则 6-2 transparency: the suspect is still listed by name.
     const { status, stdout, stderr } = runScript(['--check'], root)
-    assert.equal(status, 1, `${stdout}\n${stderr}`)
-    assert.match(stdout + stderr, /cannot verify implicit-contract suspects/)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    assert.match(stdout, /audit inactive|未找到 tests\/contracts\/implicit-seams\.ts/)
+    assert.match(stdout, /src\/suspect\.ts:3/)
+
+    // A registry that EXISTS but cannot load is corrupt state, not Level 1:
+    // an unverifiable report must never read as "all acknowledged".
+    writeFileSync(join(root, 'tests/contracts/implicit-seams.ts'), 'export const IMPLICIT_SEAMS = [')
+    const broken = runScript(['--check'], root)
+    assert.equal(broken.status, 1, `${broken.stdout}\n${broken.stderr}`)
+    assert.match(broken.stdout + broken.stderr, /cannot verify implicit-contract suspects/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -306,6 +317,143 @@ export function handleDestructured({ type, data }: SessionEvent): void {
     assert.deepEqual(broken.outcome.unattributed, [])
     const valueSeg = broken.outcome.segments.find(seg => seg.id.startsWith('field:event:demo/event::value@'))
     assert.ok(valueSeg !== undefined && valueSeg.problems.length > 0, 'broken payload field must fail its probe')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Provenance: external review P0 (2026-11-14). origin.md principle 6-2
+ * promises that upstream widening a field from non-null to nullable
+ * (`string` -> `string | undefined`) MUST fail the probe — the flagship
+ * example of the whole toolchain. A minimal fixture proved the miss: the
+ * field probe only replayed `const _probe = spec.access; void _probe`,
+ * which compiles under any nullability, so the exact promised break
+ * passed silently. Per principle 6-3 the fix starts here: these cases
+ * must be red before the fix and green after, INCLUDING the tolerance
+ * cases (principle 6's other half: no false positives on legal code).
+ */
+const NONNULL_SOURCE = `
+import type { Context } from '@deepseek-ai/cordis'
+
+declare function report(value: unknown): void
+
+export function apply(app: Context): void {
+  report(app.session.id)
+  app.logger?.info('boot')
+  if (app.session.label === undefined) return
+  report(app.session.label)
+  report(app.session.id!)
+  const tag = app.session.note
+  if (tag === undefined) return
+  report(tag)
+  report(app.session.note as string)
+}
+`
+
+/** `session.id/label/note: string` | all `| undefined` | `id` deleted. */
+function writeNonNullUpstream(root: string, variant: 'strict' | 'nullable' | 'deleted-id' | 'opaque-id'): void {
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture-plugin', version: '0.0.0', type: 'module' }))
+  const cordisDir = join(root, 'node_modules/@deepseek-ai/cordis')
+  mkdirSync(cordisDir, { recursive: true })
+  writeFileSync(join(cordisDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.1.0', types: 'index.d.ts' }))
+  const idType = variant === 'opaque-id' ? 'unknown' : variant === 'nullable' ? 'string | undefined' : 'string'
+  const fieldType = (name: string): string => `    ${name}: ${name === 'id' ? idType : variant === 'nullable' ? 'string | undefined' : 'string'}\n`
+  writeFileSync(join(cordisDir, 'index.d.ts'), `
+export interface Events {
+  'demo/event': (payload: { kind: 'a' }) => void
+}
+export class Context {
+  on<K extends keyof Events>(event: K, callback: Events[K]): void
+  session: {
+${variant === 'deleted-id' ? '' : fieldType('id')}${fieldType('label')}${fieldType('note')}  }
+  logger?: { info(msg: string): void }
+}
+`)
+}
+
+test('non-null pin: bare reads catch nullable widening; tolerant reads stay clean (principle 6-2)', async () => {
+  const engine = await loadEngine()
+  const root = mkdtempSync(join(tmpdir(), 'dsh-nonnull-'))
+  try {
+    mkdirSync(join(root, 'src'), { recursive: true })
+    mkdirSync(join(root, 'tests/contracts'), { recursive: true })
+    writeNonNullUpstream(root, 'strict')
+    writeFileSync(join(root, 'tests/contracts/implicit-seams.ts'), EMPTY_REGISTRY)
+    writeFileSync(join(root, 'src/plugin.ts'), NONNULL_SOURCE)
+
+    const written = runScript(['--write'], root)
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+
+    // --- scan-level facts: the pin marker lands on exactly the bare value reads.
+    const coupling = JSON.parse(readFileSync(join(root, 'coupling.json'), 'utf8')) as {
+      fieldPaths: Record<string, Record<string, { accesses: Array<{ site: string; pin?: boolean }> }>>
+    }
+    const bySite = (path: string): Record<string, boolean | undefined> => {
+      const entries = coupling.fieldPaths['@deepseek-ai/cordis']?.[path]?.accesses ?? []
+      return Object.fromEntries(entries.map(access => [access.site, access.pin === true]))
+    }
+    const idSites = bySite('session.id')
+    assert.equal(idSites['src/plugin.ts:7'], true, 'bare value read must carry the non-null pin')
+    assert.equal(idSites['src/plugin.ts:11'], false, 'a non-null asserted read (!) takes responsibility itself — no pin')
+    const labelSites = bySite('session.label')
+    assert.equal(labelSites['src/plugin.ts:10'], true, 'the guarded read keeps its pin (the prelude narrows before it)')
+    assert.equal(labelSites['src/plugin.ts:9'], false, 'the guard condition read is a test, not a value use')
+    assert.equal(bySite('session.note')['src/plugin.ts:12'], false,
+      'an alias captured then guarded through the alias is null-aware — no pin on the capture site')
+    assert.equal(bySite('logger')['src/plugin.ts:8'], false, 'optional-chained prefix is null-aware — no pin')
+    assert.equal(bySite('logger.info')['src/plugin.ts:8'], false, 'optional-chained chain is null-aware — no pin')
+    assert.equal(bySite('session.note')['src/plugin.ts:15'], false,
+      'a cast read (as) takes responsibility itself — no pin (r8: dsh-ops context.scope as Agent was mispinned)')
+
+    const runOn = () => engine.checkContract({
+      root, coupling,
+      fieldSpecs: engine.probeSpecsFromCoupling(coupling).fieldSpecs,
+      discriminantSpecs: engine.probeSpecsFromCoupling(coupling).discriminantSpecs,
+      unverifiable: {}, implicitFragments: {}, implicitSeams: [], implicitRuns: {},
+    })
+    const segOf = (run: ReturnType<typeof runOn>, id: string) =>
+      run.outcome.segments.find(seg => seg.id === id)
+
+    // --- strict upstream: everything compiles clean.
+    const strict = runOn()
+    assert.deepEqual(strict.outcome.unattributed, [])
+    for (const seg of strict.outcome.segments) {
+      assert.deepEqual(seg.problems, [], `segment ${seg.title} failed: ${seg.problems.join('; ')}`)
+    }
+
+    // --- nullable upstream: exactly the pinned bare read goes red (TS2322
+    // from the NonNullable assignment); every tolerant shape stays clean.
+    writeNonNullUpstream(root, 'nullable')
+    const nullable = runOn()
+    assert.deepEqual(nullable.outcome.unattributed, [])
+    const pinned = segOf(nullable, 'field:@deepseek-ai/cordis::session.id@src/plugin.ts:7')
+    assert.ok(pinned !== undefined && pinned.problems.length > 0
+      && pinned.problems.some(problem => problem.startsWith('TS2322')),
+      `the pinned bare read must fail under widening: ${pinned?.problems.join(' | ') ?? '(segment missing)'}`)
+    for (const seg of nullable.outcome.segments) {
+      if (seg.id === 'field:@deepseek-ai/cordis::session.id@src/plugin.ts:7') continue
+      assert.deepEqual(seg.problems, [], `tolerant segment must stay clean under widening: ${seg.id}: ${seg.problems.join('; ')}`)
+    }
+
+    // --- opaque upstream (`unknown`): the pin is a vacuous pass. `NonNullable`
+    // would collapse to `{}` and make every unknown-typed bare read unconditionally
+    // red (r8: dsh-ops tools/post-execute :: arguments); Exclude keeps it clean.
+    writeNonNullUpstream(root, 'opaque-id')
+    const opaque = runOn()
+    assert.deepEqual(opaque.outcome.unattributed, [])
+    const opaquePinned = segOf(opaque, 'field:@deepseek-ai/cordis::session.id@src/plugin.ts:7')
+    assert.ok(opaquePinned !== undefined && opaquePinned.problems.length === 0,
+      `the pin on an unknown-typed read must be vacuous, not red: ${opaquePinned?.problems.join(' | ') ?? '(segment missing)'}`)
+
+    // --- deleted field: both read sites report TS2339 (pre-existing behavior).
+    writeNonNullUpstream(root, 'deleted-id')
+    const deleted = runOn()
+    for (const site of ['src/plugin.ts:7', 'src/plugin.ts:11']) {
+      const seg = segOf(deleted, `field:@deepseek-ai/cordis::session.id@${site}`)
+      assert.ok(seg !== undefined && seg.problems.some(problem => problem.startsWith('TS2339')),
+        `deleted field must fail at ${site}: ${seg?.problems.join(' | ') ?? '(segment missing)'}`)
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
