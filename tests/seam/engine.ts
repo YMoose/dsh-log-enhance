@@ -23,7 +23,7 @@
 import { test } from 'node:test'
 import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -188,6 +188,11 @@ export type UnverifiableExemption = string | { readonly reason: string; readonly
 
 export interface SeamSuite {
   readonly root: string
+  /** 多版本验证（design.md 2.5）：显式类型目录，把 DSH 系列包（`@deepseek-ai/dsh`
+   *  与 `@deepseek-ai/dsh-*`，口径与 injectedServices 判定一致）的类型解析锚点
+   *  从向上查找的 node_modules 重定向过去；cordis 等独立版本包不受影响，
+   *  仍从本地解析——用于“升到目标版本会坏哪里”的升级前评估。 */
+  readonly typesRoot?: string | undefined
   readonly coupling: Coupling
   /** 每条路径一个或多个规格（每个访问点一个）；`event:*` 载荷由挂载循环生成。 */
   readonly fieldSpecs: Readonly<Record<string, readonly ProbeSpec[]>>
@@ -1331,11 +1336,47 @@ export function checkContract(suite: SeamSuite): ContractRun {
   }
   const ambientDts = collectAmbientDtsFiles(suite.root)
   const ambientSet = new Set(ambientDts.map(file => resolve(file)))
-  const probeTs = join(suite.root, 'dist-test', `seam-probe-${process.pid}-${probeSequence += 1}.ts`)
+  /** 多版本验证（design.md 2.5）：--types-root 模式下探针写进一个临时目录，
+   *  其 node_modules 为真目录：DSH 系列包逐个符号链接到显式类型目录，其余
+   *  @deepseek-ai/*（cordis、schemastery 等独立版本包）链接到本仓安装——
+   *  两类包同处一棵解析树，DSH 包对 cordis 的 `declare module` 事件增强
+   *  （hook 探针的 keyof Events 依赖它）才能合并成功；单链接整目录时增强
+   *  会静默丢失（真实仓集成验证逮住的缺陷）。preserveSymlinks 让解析身份
+   *  留在探针树内；临时目录随 finally 清理（只删链接，绝不碰两侧源目录）。 */
+  probeSequence += 1
+  const probeDir = suite.typesRoot === undefined
+    ? join(suite.root, 'dist-test')
+    : (() => {
+      const dir = join(suite.root, 'dist-test', `dsh-types-${process.pid}-${probeSequence}`)
+      const scopeDir = join(dir, 'node_modules', '@deepseek-ai')
+      mkdirSync(scopeDir, { recursive: true })
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+      for (const entry of readdirSync(join(suite.typesRoot, '@deepseek-ai'))) {
+        symlinkSync(join(suite.typesRoot, '@deepseek-ai', entry), join(scopeDir, entry), linkType)
+      }
+      const localBase = (() => {
+        let dir = suite.root
+        for (;;) {
+          if (existsSync(join(dir, 'node_modules', '@deepseek-ai'))) return join(dir, 'node_modules')
+          const parent = dirname(dir)
+          if (parent === dir) return null
+          dir = parent
+        }
+      })()
+      if (localBase !== null) {
+        for (const entry of readdirSync(join(localBase, '@deepseek-ai'))) {
+          if (existsSync(join(scopeDir, entry))) continue // types-root 的 DSH 系列优先
+          symlinkSync(join(localBase, '@deepseek-ai', entry), join(scopeDir, entry), linkType)
+        }
+      }
+      return dir
+    })()
+  const probeTs = join(probeDir, `seam-probe-${process.pid}-${probeSequence}.ts`)
   mkdirSync(dirname(probeTs), { recursive: true })
   writeFileSync(probeTs, generated.source)
   try {
-    const program = ts.createProgram([...ambientDts, probeTs], COMPILER_OPTIONS)
+    const program = ts.createProgram([...ambientDts, probeTs],
+      suite.typesRoot === undefined ? COMPILER_OPTIONS : { ...COMPILER_OPTIONS, preserveSymlinks: true })
     for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
       const text = `TS${diagnostic.code}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`
       if (diagnostic.file === undefined || diagnostic.start === undefined) {
@@ -1367,6 +1408,7 @@ export function checkContract(suite: SeamSuite): ContractRun {
     }
   } finally {
     rmSync(probeTs, { force: true })
+    if (suite.typesRoot !== undefined) rmSync(probeDir, { recursive: true, force: true })
   }
   return {
     generated,

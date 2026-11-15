@@ -14,9 +14,54 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const files = process.argv.slice(2)
-if (files.length === 0) { console.error('usage: verify-coupling.mjs <coupling.json> [...]'); process.exit(1) }
+/** 参数：`[--types-root <dir>] <coupling.json> [...]`。--types-root（design.md 2.5）
+ *  把 DSH 系列包（@deepseek-ai/dsh 与 dsh-*）的类型解析锚点重定向到显式类型
+ *  目录（目录形态与 node_modules 同构：其下有 @deepseek-ai/<pkg>/…），用于
+ *  升级前评估“升到目标版本会坏哪里”；cordis 等独立包仍解析本地安装。 */
+const files = []
+let typesRootArgument
+{
+  const args = process.argv.slice(2)
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (argument === '--types-root') {
+      typesRootArgument = args[index + 1]
+      if (typesRootArgument === undefined || typesRootArgument === '' || typesRootArgument.startsWith('--')) {
+        console.error('--types-root requires a directory argument')
+        process.exit(1)
+      }
+      index += 1
+    } else if (argument.startsWith('--')) {
+      console.error(`unknown option for verify-coupling: ${argument} (only --types-root is accepted here)`)
+      process.exit(1)
+    } else {
+      files.push(argument)
+    }
+  }
+}
+if (files.length === 0) { console.error('usage: verify-coupling.mjs [--types-root <dir>] <coupling.json> [...]'); process.exit(1) }
 const rootOverride = process.env.DSH_SEAM_ROOT ?? process.env.DSH_LOG_ENHANCE_ROOT
+const typesRoot = typesRootArgument === undefined ? undefined : resolve(process.cwd(), typesRootArgument)
+if (typesRoot !== undefined && !existsSync(join(typesRoot, '@deepseek-ai'))) {
+  console.error(`types-root ${typesRoot} contains no @deepseek-ai packages — nothing to verify against`)
+  process.exit(1)
+}
+
+/** types-root 里 DSH 系列包的 name@version 清单（报告标注用，版本即被测版本）。 */
+function dshSeriesVersions(typesRootDir) {
+  const scopeDir = join(typesRootDir, '@deepseek-ai')
+  const listed = []
+  for (const entry of readdirSync(scopeDir).sort()) {
+    if (entry !== 'dsh' && !entry.startsWith('dsh-')) continue
+    try {
+      const version = JSON.parse(readFileSync(join(scopeDir, entry, 'package.json'), 'utf8')).version
+      listed.push(`@deepseek-ai/${entry}@${String(version ?? 'unknown')}`)
+    } catch {
+      listed.push(`@deepseek-ai/${entry}@unreadable`)
+    }
+  }
+  return listed.join(', ')
+}
 
 async function loadEngine(rootHint) {
   // 原生版 typescript@7（Go 实现）的根导出只有版本存根，没有经典 Compiler API；
@@ -117,7 +162,8 @@ for (const argument of files) {
     : argument
   // npm-workspaces 提升布局：@deepseek-ai/* 可能装在 monorepo 根的
   // node_modules（插件包自身没有），与 analyze 侧同规则向上查找。
-  const nodeModulesBase = (() => {
+  // --types-root 生效时类型由显式目录提供，不再要求本地安装 @deepseek-ai/*。
+  const nodeModulesBase = typesRoot !== undefined ? typesRoot : (() => {
     let dir = resolve(root)
     for (;;) {
       if (existsSync(join(dir, 'node_modules', '@deepseek-ai'))) return join(dir, 'node_modules')
@@ -149,6 +195,7 @@ for (const argument of files) {
     root, coupling, fieldSpecs: specs.fieldSpecs, discriminantSpecs: specs.discriminantSpecs,
     unverifiable: {}, implicitFragments: {}, implicitSeams: [], implicitRuns: {},
     inventoryFloors: { srcHooks: 0, testHooks: 0, fieldPathPackages: 0, discriminantPackages: 0 },
+    ...(typesRoot !== undefined ? { typesRoot } : {}),
   })
   const verdict = { pass: 0, borrowed: 0, exempt: 0 }
   const report = []
@@ -204,7 +251,8 @@ for (const argument of files) {
   for (const problem of outcome.mismatched) report.push(`root-type drift: ${problem}`)
   console.log(`${displayLabel}: ${verdict.pass}/${outcome.segments.length} probes compile clean`
     + (verdict.borrowed > 0 ? `, ${verdict.borrowed} borrowed surface(s)` : '')
-    + (verdict.exempt > 0 ? `, ${verdict.exempt} runtime-contract surface(s) exempt` : ''))
+    + (verdict.exempt > 0 ? `, ${verdict.exempt} runtime-contract surface(s) exempt` : '')
+    + (typesRoot !== undefined ? ` [types-root: ${dshSeriesVersions(typesRoot)}]` : ''))
   for (const entry of borrowed) {
     const sites = entry.count > 1 ? ` (${entry.count} sites)` : ''
     const tag = entry.signed
