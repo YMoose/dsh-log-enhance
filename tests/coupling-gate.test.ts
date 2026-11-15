@@ -323,7 +323,7 @@ export function handleDestructured({ type, data }: SessionEvent): void {
 })
 
 /**
- * Provenance: external review P0 (2026-11-14). origin.md principle 6-2
+ * Provenance: docs/design.md principle 6-2
  * promises that upstream widening a field from non-null to nullable
  * (`string` -> `string | undefined`) MUST fail the probe — the flagship
  * example of the whole toolchain. A minimal fixture proved the miss: the
