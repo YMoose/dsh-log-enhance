@@ -150,6 +150,18 @@ deprecated 保留区。将来若出现同一分支需同时验证多条不兼容
 
 ### 其他插件仓库如何接入这套机制
 
+接入是渐进的（三级定义见 dsh-seam README §3，检查严格度与接入深度成正比）：
+
+- **Level 0 零配置**：`npx github:YMoose/dsh-seam#<ref> verify --repo .`——
+  一条命令、零文件写入，当场对当前安装列车做内存扫描 + 类型契约编译体检；
+- **Level 1 轻量门禁**：只提交 `coupling.json`——契约面进 PR 可审，CI 跑
+  `scan --check` 拦"改源码忘更契约"，不引入任何受管文件；
+- **Level 2 完整套件**：受管同步 + 隐性契约运行时测试 + 真实 `Context`
+  挂载 + 升级闭环。**本仓即 Level 2 的参照实现**（dsh-seam 语料回归同样
+  以 level 2 登记本仓；S1 的 seam-payload 门禁与 canary 的 outdated
+  advisory 分别对应其 L2 完整性与 staleness 断言）。下面的配方就是
+  Level 2 的完整落地；从 0/1 升上来是纯增量，不做也不影响低档位。
+
 以受管同步传播（工具链的家：独立仓 dsh-seam，见第 4 步），接入成本压到
 "clone + 一条 sync + 一次手动验证"。前三步是前提，没有它们，同步来的 CI
 只会永远绿——绿灯变成空话：
