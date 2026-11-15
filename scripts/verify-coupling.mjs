@@ -11,7 +11,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const files = process.argv.slice(2)
@@ -88,7 +88,18 @@ for (const argument of files) {
   const displayLabel = files.length === 1 && process.env.DSH_SEAM_LABEL !== undefined
     ? process.env.DSH_SEAM_LABEL
     : argument
-  if (!existsSync(join(root, 'node_modules/@deepseek-ai'))) {
+  // npm-workspaces 提升布局：@deepseek-ai/* 可能装在 monorepo 根的
+  // node_modules（插件包自身没有），与 analyze 侧同规则向上查找。
+  const nodeModulesBase = (() => {
+    let dir = resolve(root)
+    for (;;) {
+      if (existsSync(join(dir, 'node_modules', '@deepseek-ai'))) return join(dir, 'node_modules')
+      const parent = dirname(dir)
+      if (parent === dir) return null
+      dir = parent
+    }
+  })()
+  if (nodeModulesBase === null) {
     console.log(`${displayLabel}: 0/0 probes compile clean (skipped: no @deepseek-ai/* packages installed)`)
     continue
   }

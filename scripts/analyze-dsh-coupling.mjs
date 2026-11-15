@@ -54,6 +54,20 @@ const REPO_ROOT = ROOT_OVERRIDE
 const COUPLING_URL = join(REPO_ROOT, 'coupling.json')
 const MANIFEST_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies']
 
+/** npm-workspaces 提升布局：列车装在 monorepo 根的 node_modules，插件包自身
+ *  没有（实测：dsh-editor-socket packages/socket）。从仓库根向上找最近的
+ *  含 @deepseek-ai 命名空间的 node_modules 目录；找不到返回 null。
+ *  先查仓库根自身，普通单仓布局行为不变。 */
+function dshNodeModulesBase(fromRoot) {
+  let dir = resolve(fromRoot)
+  for (;;) {
+    if (existsSync(join(dir, 'node_modules', '@deepseek-ai'))) return join(dir, 'node_modules')
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
 function loadTypeScript() {
   const anchors = [
     import.meta.url,
@@ -1718,7 +1732,9 @@ function resolvePackageDtsEntry(specifier) {
   if (parts.length < 2) return null
   const pkgName = `${parts[0]}/${parts[1]}`
   const subpath = parts.length > 2 ? `./${parts.slice(2).join('/')}` : '.'
-  const pkgDir = join(REPO_ROOT, 'node_modules', parts[0], parts[1])
+  const nodeModulesBase = dshNodeModulesBase(REPO_ROOT)
+  if (nodeModulesBase === null) return null
+  const pkgDir = join(nodeModulesBase, parts[0], parts[1])
   const pkgJsonPath = join(pkgDir, 'package.json')
   if (!existsSync(pkgJsonPath)) return null
   try {
@@ -1805,7 +1821,7 @@ function collectAnchoredContextMembers() {
     scanDts(ambientFile, null, false)
   }
 
-  if (existsSync(join(REPO_ROOT, 'node_modules/@deepseek-ai'))) {
+  if (dshNodeModulesBase(REPO_ROOT) !== null) {
     const queue = []
     const visited = new Set()
     const seeds = new Set(['@deepseek-ai/cordis', ...Object.keys(state.packages)])
@@ -1927,7 +1943,7 @@ function canonical() {
     discriminants,
   }
   if (Object.keys(augmentations).length > 0) result.augmentations = augmentations
-  if (existsSync(join(REPO_ROOT, 'node_modules/@deepseek-ai'))) {
+  if (dshNodeModulesBase(REPO_ROOT) !== null) {
     const anchoredMembers = collectAnchoredContextMembers()
     const borrowed = Object.keys(state.ctxAccesses).sort().filter(svc => !anchoredMembers.has(svc))
     if (borrowed.length > 0) result.borrowed = borrowed

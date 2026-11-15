@@ -1789,3 +1789,78 @@ export function apply(ctx: Context): void {
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+test('workspace hoisting: node_modules at the monorepo root still anchors services and verifies (repo root = packages/<pkg>)', () => {
+  const SCAN_SCRIPT = fileURLToPath(new URL('../../scripts/analyze-dsh-coupling.mjs', import.meta.url))
+  const VERIFY_SCRIPT = fileURLToPath(new URL('../../scripts/verify-coupling.mjs', import.meta.url))
+  const monorepo = mkdtempSync(join(tmpdir(), 'dsh-hoist-'))
+  try {
+    // npm-workspaces shape: the train is hoisted to the monorepo root; the
+    // plugin package has NO node_modules of its own (repro: dsh-editor-socket
+    // packages/socket after the monorepo refactor — verify skipped with
+    // "no @deepseek-ai/* packages installed" although the root had them all).
+    writeFileSync(join(monorepo, 'package.json'), JSON.stringify({
+      name: 'fixture-monorepo', version: '0.0.0', private: true, workspaces: ['packages/*'],
+    }))
+    const cordisDir = join(monorepo, 'node_modules/@deepseek-ai/cordis')
+    const demoDir = join(monorepo, 'node_modules/@deepseek-ai/dsh-demo')
+    mkdirSync(cordisDir, { recursive: true })
+    mkdirSync(demoDir, { recursive: true })
+    writeFileSync(join(cordisDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(cordisDir, 'index.d.ts'), `
+export interface Events {
+  'demo/event': (payload: { kind: 'a' }) => void
+}
+export class Context {
+  on<K extends keyof Events>(event: K, callback: Events[K]): void
+  logger: { info(msg: string): void }
+}
+`)
+    writeFileSync(join(demoDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-demo', version: '0.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(demoDir, 'index.d.ts'), 'export type SessionEvent = { data: { id: string } }\n')
+
+    const pluginRoot = join(monorepo, 'packages/plugin')
+    mkdirSync(join(pluginRoot, 'src'), { recursive: true })
+    writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ name: 'fixture-plugin', version: '0.0.0', type: 'module' }))
+    writeFileSync(join(pluginRoot, 'src/plugin.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+import type { SessionEvent } from '@deepseek-ai/dsh-demo'
+
+export function apply(app: Context): void {
+  app.logger.info('boot')
+  app.on('demo/event', (ev) => { void ev.kind })
+}
+
+export function handleEvent(evt: SessionEvent): void {
+  void evt.data.id
+}
+`)
+    assert.ok(!existsSync(join(pluginRoot, 'node_modules')), 'fixture premise: the package has no local node_modules')
+
+    const scanned = spawnSync(process.execPath, [SCAN_SCRIPT, '--write'], {
+      encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, DSH_SEAM_ROOT: pluginRoot },
+    })
+    assert.equal(scanned.status, 0, `${scanned.stdout}\n${scanned.stderr}`)
+    const coupling = JSON.parse(readFileSync(join(pluginRoot, 'coupling.json'), 'utf8')) as {
+      fieldPaths: Record<string, unknown>
+      borrowed?: string[]
+    }
+    assert.ok(coupling.fieldPaths['@deepseek-ai/dsh-demo'] !== undefined,
+      'field paths against the hoisted train must be recorded')
+    assert.deepEqual(coupling.borrowed ?? [], [],
+      'the anchored Context service (declared by the hoisted cordis) must not read as borrowed')
+
+    const verified = spawnSync(process.execPath, [VERIFY_SCRIPT, join(pluginRoot, 'coupling.json')], {
+      encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, DSH_SEAM_ROOT: pluginRoot },
+    })
+    assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+    assert.doesNotMatch(verified.stdout, /skipped: no @deepseek-ai/,
+      'a hoisted train must not trip the skip gate')
+    assert.match(verified.stdout, /[1-9][0-9]*\/[1-9][0-9]* probes compile clean/,
+      'probes must actually compile against the hoisted train')
+  } finally {
+    rmSync(monorepo, { recursive: true, force: true })
+  }
+})
