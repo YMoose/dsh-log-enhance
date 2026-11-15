@@ -68,6 +68,12 @@ if (existsSync(repoCli)) {
     assert.deepEqual(exact, { version: '0.2.2-rc.1', fellBack: false })
     const fallback = cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.1.0-rc.8', '0.1.1-rc.1', '0.1.1-rc.2'])
     assert.deepEqual(fallback, { version: '0.1.1-rc.2', fellBack: true }, 'prerelease numeric segments must rank (rc.2 > rc.1 > 0.1.0-rc.8)')
+    // 回落不得超前于目标版本：评估「升到 0.2.x」时，一个已退出 lockstep 且
+    // 又发布了 0.3.0 的包若被回退到 0.3.0，会把 0.3 的破坏混进 0.2 的评估。
+    const noOvershoot = cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.1.1-rc.2', '0.2.0-rc.1', '0.3.0'])
+    assert.deepEqual(noOvershoot, { version: '0.2.0-rc.1', fellBack: true }, 'fallback must stay <= target')
+    // 比目标还新的包（target 时代不存在）没有可回落形态 → null（整体失败）。
+    assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.3.0']), null, 'a package newer than the target cannot fall back')
     assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', []), null, 'a package with no published versions cannot fall back')
   })
 }
