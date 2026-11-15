@@ -66,10 +66,14 @@ jobs:
           ref=$(node -p "require('./.dsh-seam.json').source.ref")
           git clone --quiet "$repo" "$RUNNER_TEMP/dsh-seam"
           git -C "$RUNNER_TEMP/dsh-seam" checkout --quiet "$ref"
+          # also echoed to the log so `gh run view --log` can grep it;
+          # the summary keeps the fenced, human-facing copy.
+          notice=$(node "$RUNNER_TEMP/dsh-seam/cli.mjs" outdated --into .)
+          printf '%s\n' "$notice"
           {
             echo '### dsh-seam toolchain status (advisory)'
             echo '```'
-            node "$RUNNER_TEMP/dsh-seam/cli.mjs" outdated --into .
+            printf '%s\n' "$notice"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
