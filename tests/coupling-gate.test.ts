@@ -2106,3 +2106,101 @@ test('a legacy coupling.json without schemaVersion still verifies (back-compat, 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('pnpm-workspace.yaml is a first-class discovery source for --recursive (decision 15)', () => {
+  const repoCli = fileURLToPath(new URL('../../../cli.mjs', import.meta.url))
+  if (!existsSync(repoCli)) return
+
+  const monorepo = mkdtempSync(join(tmpdir(), 'dsh-pnpm-rec-'))
+  try {
+    // pnpm-only monorepo：package.json 无 workspaces 声明，全靠 pnpm-workspace.yaml
+    writeFileSync(join(monorepo, 'package.json'), JSON.stringify({
+      name: 'fixture-pnpm-monorepo', version: '0.0.0', private: true,
+    }))
+    writeFileSync(join(monorepo, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+    const cordisDir = join(monorepo, 'node_modules/@deepseek-ai/cordis')
+    mkdirSync(cordisDir, { recursive: true })
+    writeFileSync(join(cordisDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(cordisDir, 'index.d.ts'), `
+export class Context {
+  logger: { info(msg: string): void }
+}
+`)
+    const alpha = join(monorepo, 'packages/alpha')
+    mkdirSync(join(alpha, 'src'), { recursive: true })
+    writeFileSync(join(alpha, 'package.json'), JSON.stringify({
+      name: 'fixture-alpha', version: '0.0.0', type: 'module',
+      dependencies: { '@deepseek-ai/cordis': '4.1.0' },
+    }))
+    writeFileSync(join(alpha, 'src/plugin.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+export function apply(app: Context): void {
+  app.logger.info('boot')
+}
+`)
+
+    // 1) --write --recursive：yaml 里的 packages/* 必须被发现并真正写入子包契约
+    const written = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo, '--write', '--recursive'], {
+      encoding: 'utf8', timeout: 60_000,
+    })
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    assert.match(written.stdout, /packages\/alpha\s+1 @deepseek-ai dep\(s\) -> scan\/verify/,
+      'the yaml-declared package must appear in the discovery table')
+    assert.match(written.stdout, /recursive scan: 1 plugin package\(s\), green/)
+    assert.ok(existsSync(join(alpha, 'coupling.json')), 'the sub-package contract must actually be written')
+
+    // 2) verify --recursive：子包探针真实编译，而不是空洞的 no workspace packages found
+    const verified = spawnSync(process.execPath, [repoCli, 'verify', '--repo', monorepo, '--recursive'], {
+      encoding: 'utf8', timeout: 60_000,
+    })
+    assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+    assert.ok(!/no workspace packages found/.test(verified.stdout),
+      'a pnpm-only monorepo must not read as an empty workspace')
+    assert.match(verified.stdout, /packages\/alpha.*[1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+
+    // 3) 无 --recursive 时同样给出透明引导
+    const guided = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo], {
+      encoding: 'utf8', timeout: 60_000,
+    })
+    assert.equal(guided.status, 0, `${guided.stdout}\n${guided.stderr}`)
+    assert.match(guided.stdout, /NOTE: this root declares no @deepseek-ai\/\* dependency, but 1 workspace package\(s\) do:/)
+  } finally {
+    rmSync(monorepo, { recursive: true, force: true })
+  }
+})
+
+test('a root-only pnpm workspace (packages: [.]) probes the root as its single plugin package', () => {
+  const repoCli = fileURLToPath(new URL('../../../cli.mjs', import.meta.url))
+  if (!existsSync(repoCli)) return
+
+  const single = mkdtempSync(join(tmpdir(), 'dsh-pnpm-root-'))
+  try {
+    writeFileSync(join(single, 'package.json'), JSON.stringify({
+      name: 'fixture-pnpm-single', version: '0.0.0', type: 'module',
+      dependencies: { '@deepseek-ai/cordis': '4.1.0' },
+    }))
+    // pnpm 常见的反爬升写法：把根自身声明为唯一 workspace 成员
+    writeFileSync(join(single, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
+    const cordisDir = join(single, 'node_modules/@deepseek-ai/cordis')
+    mkdirSync(cordisDir, { recursive: true })
+    writeFileSync(join(cordisDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.1.0', types: 'index.d.ts' }))
+    writeFileSync(join(cordisDir, 'index.d.ts'), 'export class Context { logger: { info(msg: string): void } }\n')
+    mkdirSync(join(single, 'src'), { recursive: true })
+    writeFileSync(join(single, 'src/plugin.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+export function apply(app: Context): void {
+  app.logger.info('boot')
+}
+`)
+
+    const written = spawnSync(process.execPath, [repoCli, 'scan', '--root', single, '--write', '--recursive'], {
+      encoding: 'utf8', timeout: 60_000,
+    })
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    assert.match(written.stdout, /recursive scan: 1 plugin package\(s\), green/,
+      'the root itself must be probed via its `.` membership')
+    assert.ok(existsSync(join(single, 'coupling.json')))
+  } finally {
+    rmSync(single, { recursive: true, force: true })
+  }
+})

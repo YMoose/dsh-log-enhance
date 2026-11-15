@@ -1,7 +1,7 @@
 {
   "source": {
     "repo": "https://github.com/YMoose/dsh-seam",
-    "ref": "feee47a3d76a2d2457a539838d866dc44819b71d"
+    "ref": "c8fd8b9dcd73a5b203dedee40da21ecf20178624"
   },
   "files": {
     "scripts/analyze-dsh-coupling.mjs": "6e38498ef9da7d6f6d4f917366e5d8989bbea672ea783b386ddb3e041da63f96",
@@ -12,7 +12,7 @@
     "tests/baseline-fingerprint.test.ts": "1c73a5504f0f20f25f37640cbe458fb485269dd034b3bb67bc6411c60cd5ecdd",
     "tests/bump-upstream.test.ts": "b926040a15d659032915b43f1bbee18f6f570ead1e3d9c0f6ec30d2126ce8932",
     "tests/cli-manifest.test.ts": "2d31a06438199708a7ac2fd54f6c47604b6b0026f369c99060af77e3adbafddb",
-    "tests/coupling-gate.test.ts": "1081149732a53f0e3da223f109afa6f58dc59714256b4aa6e6288caff2f67241",
+    "tests/coupling-gate.test.ts": "13c404e777129f77ea7c6e58008797938df64a0194bfdfb6eb7a51bce38d3a76",
     "tests/seam-suite.test.ts": "c12f9e51325ad90475bf298c53b98b3c10e695b462c72b563ae787794b38981d",
     "tests/seam/engine.ts": "11dfdc4da9881063187cf547831cb650d4b9be3cd4014aad4eac472a53ac67b7",
     "tests/seam/standard-specs.ts": "6e27debb834650fbc96d4fcfea602155cd679d21ed6c431afd85c710965d2bfb"
