@@ -780,7 +780,8 @@ test('cli.mjs enforces path containment, pre-deletion hash verification, and ato
     rmSync(dirD, { recursive: true, force: true })
   }
 
-  // Case E: Empty files map and stale payload hashes fail check (H1).
+  // Case E: Empty files map fails check; offline matching is green, drift is red,
+  // and staleness is resolved by sync (decision 7: check = offline gate only).
   const dirE = mkdtempSync(join(tmpdir(), 'dsh-cli-stale-'))
   try {
     writeFileSync(join(dirE, '.dsh-seam.json'), JSON.stringify({ source: {}, files: {} }))
@@ -804,9 +805,22 @@ test('cli.mjs enforces path containment, pre-deletion hash verification, and ato
     manifest.files['scripts/check-compat.mjs'] = oldHash
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
-    const staleChecked = runCli(['check', '--into', dirE])
-    assert.equal(staleChecked.status, 1, `${staleChecked.stdout}\n${staleChecked.stderr}`)
-    assert.match(staleChecked.stderr, /stale managed file/)
+    // A file matching its recorded hash is green — even if the payload has moved on;
+    // check deliberately knows nothing about the source checkout anymore.
+    const matchChecked = runCli(['check', '--into', dirE])
+    assert.equal(matchChecked.status, 0, `${matchChecked.stdout}\n${matchChecked.stderr}`)
+    // Content diverging from the recorded hash is still a hard offline failure...
+    writeFileSync(staleTarget, '// tampered\n')
+    const driftChecked = runCli(['check', '--into', dirE])
+    assert.equal(driftChecked.status, 1, `${driftChecked.stdout}\n${driftChecked.stderr}`)
+    assert.match(driftChecked.stderr, /drift/)
+    // ...and sync is where staleness gets resolved: restore the recorded bytes
+    // (tampered state must be refused by sync's own guard), then refresh and re-stamp.
+    writeFileSync(staleTarget, oldContent)
+    const resynced = runCli(['sync', '--into', dirE])
+    assert.equal(resynced.status, 0, `${resynced.stdout}\n${resynced.stderr}`)
+    const after = JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: Record<string, string> }
+    assert.notEqual(after.files['scripts/check-compat.mjs'], oldHash)
   } finally {
     rmSync(dirE, { recursive: true, force: true })
   }
@@ -1074,7 +1088,7 @@ test('cli.mjs supports bare npx-style self-bootstrapping, default --into, and Le
       _resolved: 'https://codeload.github.com/YMoose/dsh-seam/tar.gz/deadbeef1234567890abcdef1234567890abcdef',
     }))
 
-    // 2. Test default --into (cwd) and cross-machine manifest.source.path fallback in check.
+    // 2. Test default --into (cwd): the manifest is portable (repo + ref, no absolute path).
     const syncDefault = spawnSync(process.execPath, [bareCli, 'sync'], {
       cwd: syncedConsumerDir,
       encoding: 'utf8',
@@ -1083,20 +1097,21 @@ test('cli.mjs supports bare npx-style self-bootstrapping, default --into, and Le
     assert.equal(syncDefault.status, 0, `${syncDefault.stdout}\n${syncDefault.stderr}`)
     const manifestPath = join(syncedConsumerDir, '.dsh-seam.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-      source: { path: string; commit: string }
+      source: { repo: string; ref: string; path?: unknown }
       files: Record<string, string>
     }
-    assert.equal(manifest.source.commit, 'deadbeef1234567890abcdef1234567890abcdef')
+    assert.equal(manifest.source.ref, 'deadbeef1234567890abcdef1234567890abcdef')
+    assert.equal(manifest.source.repo, 'https://github.com/YMoose/dsh-seam')
+    assert.equal(manifest.source.path, undefined)
 
-    // Simulate checking on another machine where manifest.source.path does not exist.
-    manifest.source.path = join(syncedConsumerDir, 'nonexistent-machine-path')
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    // check is a pure offline gate: it never locates a dsh-seam source checkout.
     const checkDefault = spawnSync(process.execPath, [bareCli, 'check'], {
       cwd: syncedConsumerDir,
       encoding: 'utf8',
       timeout: 30_000,
     })
     assert.equal(checkDefault.status, 0, `${checkDefault.stdout}\n${checkDefault.stderr}`)
+    assert.match(checkDefault.stdout, /pinned to YMoose\/dsh-seam@deadbee/)
 
     // 3. Level 0 zero-write verification on a fresh plugin repo (no coupling.json, no implicit-seams.ts).
     mkdirSync(join(pluginDir, 'src'), { recursive: true })

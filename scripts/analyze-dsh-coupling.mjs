@@ -2065,7 +2065,8 @@ const METADATA_KEYS = ['schemaVersion', 'generator', 'generatedAt']
 const SCHEMA_VERSION = 1
 
 /** dsh-seam 版本溯源：直接运行时取本仓 package.json；同步脚本场景取插件仓
- *  `.dsh-seam.json` 记录的 `source.commit`；都拿不到则如实标记 unknown。 */
+ *  `.dsh-seam.json` 记录的 `source.ref`（legacy 清单为 `source.commit`）；
+ *  都拿不到则如实标记 unknown。 */
 function dshSeamProvenance() {
   let dir = dirname(fileURLToPath(import.meta.url))
   for (;;) {
@@ -2082,7 +2083,7 @@ function dshSeamProvenance() {
   }
   try {
     const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.dsh-seam.json'), 'utf8'))
-    const ref = manifest?.source?.commit
+    const ref = manifest?.source?.ref ?? manifest?.source?.commit
     if (typeof ref === 'string' && ref.trim() !== '' && ref !== 'unknown') return `ref:${ref.slice(0, 12)}`
   } catch {}
   return 'unknown'
