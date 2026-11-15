@@ -147,6 +147,81 @@ test('write mode recomputes the upper bound on a cross-minor move', () => {
   }
 })
 
+test('write mode touches only dsh-* versions and engines.dsh — scripts, other deps, and custom fields stay intact (AGENTS §2.5)', () => {
+  // Write-scope red line: a rich manifest where everything outside the two
+  // allowed mutation points (dsh-* train versions, engines.dsh) must survive
+  // the rewrite untouched — top-level key order included. A tool that edits
+  // more than it promised is worse than one that under-reports.
+  interface RichManifest {
+    readonly name: string
+    readonly version: string
+    readonly description: string
+    readonly engines: Record<string, string>
+    readonly scripts: Record<string, string>
+    readonly dependencies: Record<string, string>
+    readonly devDependencies: Record<string, string>
+    readonly peerDependencies: Record<string, string>
+    readonly dshSeam: Record<string, unknown>
+  }
+  const before: RichManifest = {
+    name: 'fixture-plugin',
+    version: '0.0.0',
+    description: 'must survive the rewrite verbatim',
+    engines: { node: '>=24.9.0', dsh: '>=0.2.2-rc.3 <0.3.0-0' },
+    scripts: { test: 'node --test tests/', check: 'npm run typecheck && npm test' },
+    dependencies: { leftpad: '^1.0.0' },
+    devDependencies: {
+      // Separate train (non-dsh name): must never be rewritten.
+      '@deepseek-ai/cordis-plugin-loader': '1.1.0',
+      '@deepseek-ai/dsh-agent': '0.2.2-rc.3',
+      typescript: '6.0.3',
+    },
+    peerDependencies: { '@deepseek-ai/cordis': '^4.1.0' },
+    dshSeam: { custom: { nested: [1, 2, { deep: true }] } },
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bump-scope-'))
+  const manifestPath = join(dir, 'package.json')
+  const baselinePath = join(dir, 'baseline.json')
+  writeFileSync(manifestPath, `${JSON.stringify(before, null, 2)}\n`)
+  writeFileSync(baselinePath, `${JSON.stringify({ generatedAt: BASELINE_AT, packages: {} }, null, 2)}\n`)
+  const at: Fixture = { manifestPath, baselinePath, dir }
+  const registry = fixtureRegistry({
+    '@deepseek-ai/dsh': {
+      'dist-tags': { next: '0.2.2-rc.4' },
+      time: { '0.2.2-rc.3': RC3_PUBLISHED, '0.2.2-rc.4': '2026-11-14T00:00:00.000Z' },
+      versions: { '0.2.2-rc.4': {} },
+    },
+  })
+  try {
+    const { status, stdout, stderr } = runScript([], at, registry.base)
+    assert.equal(status, 0, `${stdout}\n${stderr}`)
+    const after = JSON.parse(readFileSync(manifestPath, 'utf8')) as RichManifest
+
+    // 1. The two allowed mutation points actually moved.
+    assert.equal(after.devDependencies['@deepseek-ai/dsh-agent'], '0.2.2-rc.4')
+    assert.equal(after.engines.dsh, '>=0.2.2-rc.4 <0.3.0-0')
+
+    // 2. No key added, removed, or reordered at the top level.
+    assert.deepEqual(Object.keys(after), Object.keys(before))
+
+    // 3. Everything outside the mutation points is deep-equal.
+    const strip = (manifest: RichManifest): RichManifest => {
+      const clone = JSON.parse(JSON.stringify(manifest)) as RichManifest
+      delete clone.devDependencies['@deepseek-ai/dsh-agent']
+      delete clone.engines.dsh
+      return clone
+    }
+    assert.deepEqual(strip(after), strip(before))
+
+    // 4. Output stays an operation follow-up, never a config-change suggestion
+    //    (the NODE_USE_ENV_PROXY lesson: bad advice beats silence in damage).
+    assert.doesNotMatch(stdout, /NODE_|environment variable|环境变量/i)
+  } finally {
+    rmSync(at.dir, { recursive: true, force: true })
+    rmSync(registry.dir, { recursive: true, force: true })
+  }
+})
+
 test('check mode reports no change when the train and publish times are unchanged', () => {
   const at = fixture()
   const registry = fixtureRegistry({
