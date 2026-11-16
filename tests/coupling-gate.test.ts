@@ -2083,6 +2083,89 @@ test('--write is idempotent: a second run over an unchanged inventory rewrites n
   }
 })
 
+// ---- 决策 20：漂移门禁语义比较（只排对象键，数组保序） --------------------
+
+/** 深度翻转对象键序（模拟手工格式化 / Prettier 重排）；数组保持原序——
+ *  数组语义有序，翻它就是改变内容。 */
+function flipObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(flipObjectKeys)
+  if (value !== null && typeof value === 'object') {
+    const source = value as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const key of Object.keys(source).reverse()) out[key] = flipObjectKeys(source[key])
+    return out
+  }
+  return value
+}
+
+/** 带真实类型锚定的 fixture：mock 上游 + L1 显式 import，保证 coupling.json
+ *  的内容 section（packages / hooks / fieldPaths 等）非空，键序重排才有面。 */
+function writeSemanticDriftFixture(root: string): void {
+  writeMockUpstream(root, true)
+  writeFileSync(join(root, 'src/index.ts'),
+    "import type { Context } from '@deepseek-ai/cordis'\n"
+    + 'export function setup(ctx: Context): void {\n'
+    + '  ctx.on("demo/event", (payload) => {\n'
+    + '    if (payload.kind === "a") { const value: string = payload.value; void value }\n'
+    + '  })\n'
+    + '}\n')
+}
+
+test('the --check drift gate is semantic: reordered object keys are not drift (decision 20)', () => {
+  const root = fixtureRoot('')
+  try {
+    writeSemanticDriftFixture(root)
+    assert.equal(runScript(['--write'], root).status, 0)
+    const reformatted = `${JSON.stringify(flipObjectKeys(JSON.parse(readFileSync(join(root, 'coupling.json'), 'utf8'))), null, 2)}\n`
+    writeFileSync(join(root, 'coupling.json'), reformatted)
+    const check = runScript(['--check'], root)
+    assert.equal(check.status, 0,
+      `key order carries no source information — a reformatted coupling.json must not read as drift (decision 20):\n${check.stdout}\n${check.stderr}`)
+    assert.match(check.stdout, /coupling inventory matches coupling\.json/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the semantic drift gate still catches real content changes under reordered keys (decision 20)', () => {
+  const root = fixtureRoot('')
+  try {
+    writeSemanticDriftFixture(root)
+    assert.equal(runScript(['--write'], root).status, 0)
+    const mutated = flipObjectKeys(JSON.parse(readFileSync(join(root, 'coupling.json'), 'utf8'))) as Record<string, unknown>
+    assert.ok(mutated.packages !== null && typeof mutated.packages === 'object'
+      && Object.keys(mutated.packages as Record<string, unknown>).length > 0,
+      'fixture must produce a non-empty packages section for the mutation to land in a content section')
+    ;(mutated.packages as Record<string, unknown>)['@deepseek-ai/zz-sentinel-drift'] = {}
+    writeFileSync(join(root, 'coupling.json'), `${JSON.stringify(mutated, null, 2)}\n`)
+    const check = runScript(['--check'], root)
+    assert.equal(check.status, 1, 'real content drift must stay red under semantic comparison')
+    assert.match(check.stderr, /漂移|drift/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('--write re-normalizes a semantically equal but reformatted coupling.json (decision 20)', () => {
+  const root = fixtureRoot('')
+  try {
+    writeSemanticDriftFixture(root)
+    assert.equal(runScript(['--write'], root).status, 0)
+    const canonical = readFileSync(join(root, 'coupling.json'), 'utf8')
+    const reformatted = `${JSON.stringify(flipObjectKeys(JSON.parse(canonical)), null, 2)}\n`
+    writeFileSync(join(root, 'coupling.json'), reformatted)
+    const rewrote = runScript(['--write'], root)
+    assert.equal(rewrote.status, 0, `${rewrote.stdout}\n${rewrote.stderr}`)
+    assert.notEqual(readFileSync(join(root, 'coupling.json'), 'utf8'), reformatted,
+      'the idempotent-write comparison stays byte-level, so a reformatted file is rewritten to the tool-standard shape')
+    const again = runScript(['--write'], root)
+    assert.match(again.stdout, /unchanged/i, 'after re-normalization the write is idempotent again')
+    assert.equal(runScript(['--check'], root).status, 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('verify refuses a coupling.json stamped with an unknown schema version', async () => {
   const VERIFY_SCRIPT = fileURLToPath(new URL('../../scripts/verify-coupling.mjs', import.meta.url))
   const root = mkdtempSync(join(tmpdir(), 'dsh-schema-unknown-'))

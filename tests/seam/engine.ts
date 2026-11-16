@@ -25,7 +25,7 @@ import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { Context } from '@deepseek-ai/cordis'
@@ -988,6 +988,10 @@ function generate(suite: SeamSuite): Generated {
   for (const [id, fragments] of Object.entries(implicitFragments)) {
     const seal = implicitSeams.find(seam => seam.id === id)
     if (seal === undefined) throw new Error(`implicit fragment for unknown seam: ${id}`)
+    // G6（原则 8：静默的零结果不是成功）：空片段表不是证据——不 claim
+    // segment，让完整性断言把该 seam 判为无证据。空表曾 claim 出一个
+    // 零检查的空探针 segment，冒充「有类型片段」通过完整性检查。
+    if (fragments.length === 0) continue
     const seam = claim(
       `implicit:${id}`,
       `[implicit/type] ${id} ${seal.probe} (at ${seal.usedAt}) -> Audit ${seal.auditSection}`,
@@ -1286,6 +1290,10 @@ export interface ContractOutcome {
   }>
   /** 未归属到任何依赖项的诊断（生成脚架自身坏了）。 */
   readonly unattributed: readonly string[]
+  /** L2a ambient `.d.ts` 内的诊断（决策 19 A0）：在 verify 输出中列出
+   *  （可见、透明），但不计入失败、也不进 unattributed——静默丢弃会造成
+   *  上游断裂时输出逐字节无差异的假绿。是否升级阻断（A1）等语料噪音数据。 */
+  readonly ambient: readonly string[]
   /** `coupling.json` 里有、但既没有检查代码也没有豁免的键。 */
   readonly unprobed: readonly string[]
   /** 规格里写了、但 `coupling.json` 已经不记录的键（清单过期）。 */
@@ -1351,12 +1359,14 @@ export function checkContract(suite: SeamSuite): ContractRun {
   const generated = generate(effective)
   const bySeam = new Map<string, string[]>()
   const unattributed: string[] = []
+  const ambientProblems: string[] = []
   if (generated.segments.size === 0 && Object.keys(effective.implicitFragments).length === 0) {
     return {
       generated,
       outcome: {
         segments: [],
         unattributed,
+        ambient: ambientProblems,
         unprobed: generated.unprobed,
         stale: generated.stale,
         mismatched: generated.mismatched,
@@ -1413,6 +1423,9 @@ export function checkContract(suite: SeamSuite): ContractRun {
         continue
       }
       const diagFile = resolve(diagnostic.file.fileName)
+      // 主编译开了 skipLibCheck（防 node_modules 声明噪音），ambient `.d.ts`
+      // 的诊断在此通道一律丢弃——语法与语义统一由下方第二个定向 program
+      // 收集（决策 19 A0），单一收集点避免重复计数。
       if (ambientSet.has(diagFile)) continue
       if (diagFile !== resolve(probeTs)) {
         unattributed.push(`${text} (${diagnostic.file.fileName})`)
@@ -1433,6 +1446,24 @@ export function checkContract(suite: SeamSuite): ContractRun {
       if (messages.some(message => /^TS(?:2345|2769):/.test(message))) {
         const filtered = messages.filter(message => !/^TS7006:/.test(message))
         if (filtered.length > 0) bySeam.set(seam, filtered)
+      }
+    }
+    // 决策 19 A0：ambient `.d.ts` 断裂可见。COMPILER_OPTIONS 的 skipLibCheck
+    // 在 checker 层面抑制 .d.ts 语义诊断（定向 getSemanticDiagnostics 也不出），
+    // 主循环看不见 L2a 断裂——静默曾使上游改名时 verify 输出逐字节无差异
+    // （假绿）。此处用第二个轻量 program 只装 ambient 文件、关 skipLibCheck：
+    // 只收落在 ambient 文件内的诊断（node_modules 上游声明自身的质量不在
+    // 本工具职责内）；A0 列出不阻断，A1（阻断）等真实语料噪音数据再议。
+    if (ambientDts.length > 0) {
+      const ambientProgram = ts.createProgram(ambientDts, { ...COMPILER_OPTIONS, skipLibCheck: false })
+      for (const diagnostic of ts.getPreEmitDiagnostics(ambientProgram)) {
+        if (diagnostic.file === undefined) continue
+        const diagFile = resolve(diagnostic.file.fileName)
+        if (!ambientSet.has(diagFile)) continue
+        const text = `TS${diagnostic.code}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`
+        const line = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0).line
+        const entry = `${text} (${relative(suite.root, diagFile)}:${line + 1})`
+        if (!ambientProblems.includes(entry)) ambientProblems.push(entry)
       }
     }
   } finally {
@@ -1473,6 +1504,7 @@ export function checkContract(suite: SeamSuite): ContractRun {
         }
       }),
       unattributed,
+      ambient: ambientProblems,
       unprobed: generated.unprobed,
       stale: generated.stale,
       mismatched: generated.mismatched,
@@ -1596,7 +1628,7 @@ export function runSeamSuite(suite: SeamSuite): void {
       const fragment = generated.segments.has(`implicit:${seam.id}`)
       const delegations = suite.implicitDelegations?.[seam.id]
       assert.ok(
-        run !== undefined || fragment || delegations !== undefined,
+        run !== undefined || fragment || (delegations?.length ?? 0) > 0,
         `implicit seam '${seam.id}' has no probe, type fragment, or covering-test reference`,
       )
       if (run !== undefined) await run(context, environment)
@@ -1609,6 +1641,10 @@ export function runSeamSuite(suite: SeamSuite): void {
         )
       }
       for (const delegation of delegations ?? []) {
+        // G6：委托条目必须点名至少一个覆盖测试——空 tests 列表曾让检查
+        // 循环零迭代，一个没有任何测试引用的 delegation 冒充了证据。
+        assert.ok(delegation.tests.length > 0,
+          `delegation for '${seam.id}' (${delegation.file}) carries no test titles — an empty list is not evidence`)
         const text = readText(suite.root, delegation.file)
         for (const title of delegation.tests) {
           assert.ok(text.includes(title), `${delegation.file} must still contain the covering test: ${title}`)

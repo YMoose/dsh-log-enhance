@@ -160,6 +160,40 @@ for (const argument of files) {
   const displayLabel = files.length === 1 && process.env.DSH_SEAM_LABEL !== undefined
     ? process.env.DSH_SEAM_LABEL
     : argument
+  // 输入门（原则 8 / 批 3 G5）：契约文件「存在、可解析、schema 受支持」
+  // 三查必须先于一切环境判定——历史实现把依赖探测放在文件读取之前，
+  // 「依赖未装 + 契约路径写错/schema 不受支持」会走 skip 分支 exit 0
+  // （外部 review 实测的假绿家族），裸读崩溃则是它的另一面。逐目标失败、
+  // 汇总退出（原则 8：多目标按目标隔离）。
+  const couplingPath = resolve(process.cwd(), argument)
+  if (!existsSync(couplingPath)) {
+    console.error(`${displayLabel}: file not found — pass a coupling.json produced by 'dsh-seam scan --write'`)
+    failed = true
+    continue
+  }
+  let coupling
+  try {
+    coupling = JSON.parse(readFileSync(couplingPath, 'utf8'))
+  } catch (error) {
+    console.error(`${displayLabel}: not valid JSON (${error instanceof Error ? error.message : 'parse error'}) — regenerate with 'dsh-seam scan --write'`)
+    failed = true
+    continue
+  }
+  if (coupling.schemaVersion !== undefined && coupling.schemaVersion !== 1) {
+    console.error(`${displayLabel}: coupling.json schema version ${coupling.schemaVersion} 不受当前 dsh-seam 支持`
+      + '（可识别版本 1）：用 dsh-seam scan --write 重新生成，或升级 dsh-seam')
+    failed = true
+    continue
+  }
+  // L5（决策 15：目标单位 = 插件包根目录）：包根锚定 coupling.json 所在
+  // 目录、且该目录确实是个包（自带 package.json）。进程 cwd 与
+  // DSH_SEAM_ROOT 分别只是路径解析起点与 engine 定位根，都不能当包根——
+  // 从 monorepo 仓根跑子包契约时，错位的 root 会让 ambient 收集范围落在
+  // 仓根（L2a 断裂不可见）、探针以错误的模块语义编译（TS1287 假红）、
+  // 零锚定提示读到仓根的 package.json。无 package.json 的落点（cli Level 0
+  // 的临时目录、外部契约的旁路目录）回退全局 root，维持既有语义。
+  const couplingDir = dirname(couplingPath)
+  const packageRoot = existsSync(join(couplingDir, 'package.json')) ? couplingDir : root
   // npm-workspaces 提升布局：@deepseek-ai/* 可能装在 monorepo 根的
   // node_modules（插件包自身没有），与 analyze 侧同规则向上查找。
   // --types-root 生效时类型由显式目录提供，不再要求本地安装 @deepseek-ai/*。
@@ -176,13 +210,6 @@ for (const argument of files) {
     console.log(`${displayLabel}: 0/0 probes compile clean (skipped: no @deepseek-ai/* packages installed)`)
     continue
   }
-  const coupling = JSON.parse(readFileSync(resolve(process.cwd(), argument), 'utf8'))
-  if (coupling.schemaVersion !== undefined && coupling.schemaVersion !== 1) {
-    console.error(`${displayLabel}: coupling.json schema version ${coupling.schemaVersion} 不受当前 dsh-seam 支持`
-      + '（可识别版本 1）：用 dsh-seam scan --write 重新生成，或升级 dsh-seam')
-    failed = true
-    continue
-  }
   const specs = probeSpecsFromCoupling(coupling)
   /** Display name of a segment id: `pkg::path`（去掉 site 后缀与类别前缀）。 */
   const surfaceName = id => {
@@ -192,7 +219,7 @@ for (const argument of files) {
     return `${surface.slice(0, separator)}::${bare}`
   }
   const { outcome } = checkContract({
-    root, coupling, fieldSpecs: specs.fieldSpecs, discriminantSpecs: specs.discriminantSpecs,
+    root: packageRoot, coupling, fieldSpecs: specs.fieldSpecs, discriminantSpecs: specs.discriminantSpecs,
     unverifiable: {}, implicitFragments: {}, implicitSeams: [], implicitRuns: {},
     inventoryFloors: { srcHooks: 0, testHooks: 0, fieldPathPackages: 0, discriminantPackages: 0 },
     ...(typesRoot !== undefined ? { typesRoot } : {}),
@@ -255,7 +282,7 @@ for (const argument of files) {
   // （纯 JS / manifest 注入形态，语料实证 dsh-media-desk）。声明数读仓库
   // 自己的 package.json（真相源）——coupling.packages 只在源码 import 时
   // 记录，纯 JS 仓恒为空，不能作为判定依据。提示为 advisory，不改变退出码。
-  const manifestDeps = readFileSync(join(root, 'package.json'), 'utf8')
+  const manifestDeps = readFileSync(join(packageRoot, 'package.json'), 'utf8')
   let declaredDshCount = 0
   try {
     const manifest = JSON.parse(manifestDeps)
@@ -268,9 +295,11 @@ for (const argument of files) {
   const zeroAnchorHint = outcome.segments.length === 0 && declaredDshCount > 0
     ? ` [no type-anchored surfaces: ${declaredDshCount} declared @deepseek-ai package(s) without explicit import/type usage — the type contract does not apply to pure-JS or manifest-injected coupling; runtime compatibility needs a runtime checker]`
     : ''
+  const ambientDiagnostics = outcome.ambient ?? []
   console.log(`${displayLabel}: ${verdict.pass}/${outcome.segments.length} probes compile clean`
     + (verdict.borrowed > 0 ? `, ${verdict.borrowed} borrowed surface(s)` : '')
     + (verdict.exempt > 0 ? `, ${verdict.exempt} runtime-contract surface(s) exempt` : '')
+    + (ambientDiagnostics.length > 0 ? `, ${ambientDiagnostics.length} ambient .d.ts diagnostic(s) listed` : '')
     + zeroAnchorHint
     + (typesRoot !== undefined ? ` [types-root: ${dshSeriesVersions(typesRoot)}]` : ''))
   for (const entry of borrowed) {
@@ -283,6 +312,12 @@ for (const argument of files) {
   for (const entry of exempted) {
     const sites = entry.count > 1 ? ` (${entry.count} sites)` : ''
     console.log(`  ~ exempt: ${entry.name} — ${entry.reason}${sites}`)
+  }
+  // L2a ambient 诊断（决策 19 A0）：列出可见、不阻断——advisory 通道，
+  // 绝不进 report（report 非空即置 failed）。上游改名致声明断裂曾是
+  // 逐字节无差异的假绿；A1（阻断）等真实语料噪音数据再议。
+  for (const problem of ambientDiagnostics) {
+    console.log(`  ~ ambient .d.ts diagnostic (listed, not gating): ${problem}`)
   }
   for (const line of report) console.log(`  ✖ ${line}`)
   if (report.length > 0) failed = true

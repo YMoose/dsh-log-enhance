@@ -2231,8 +2231,21 @@ if (MODE === 'write') {
     console.log('~ legacy coupling.json（无 schemaVersion）：重新 --write 一次即可记录生成器与时间戳溯源')
   }
   const allSections = [...new Set([...Object.keys(data), ...Object.keys(contractOf(committed))])]
+  // 决策 20：漂移门禁做语义比较——两边深度排序对象键后再比（只排对象键，
+  // 数组保持原序——数组语义有序）。键序不携带源码变化信息，手工格式化后的
+  // coupling.json 内容未变而判红属于拦假问题（原则 6）；输出的字节稳定性由
+  // 幂等写入负责（键序敏感的值比较，格式扰动照常重写归位工具标准形态），
+  // 两层各司其职：格式化 → check 绿 → 下次 write 自动归位。
+  const canonicalize = (value) => {
+    if (Array.isArray(value)) return value.map(canonicalize)
+    if (value !== null && typeof value === 'object') {
+      const source = value
+      return Object.fromEntries(Object.keys(source).sort().map(key => [key, canonicalize(source[key])]))
+    }
+    return value
+  }
   const drifted = allSections.filter(
-    section => JSON.stringify(committed[section]) !== JSON.stringify(data[section]),
+    section => JSON.stringify(canonicalize(committed[section])) !== JSON.stringify(canonicalize(data[section])),
   )
   if (drifted.length === 0) {
     console.log('coupling inventory matches coupling.json')
