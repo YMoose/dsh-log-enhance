@@ -1030,7 +1030,10 @@ function generate(suite: SeamSuite): Generated {
               `[auto/field] ${payloadKey} :: ${path} (at ${access.site}${under})${sectionSuffix(payloadKey, path)}`,
             )
             covered.add(key)
-            if ((spec.prelude?.length ?? 0) === 0 && spec.element === undefined) {
+            // 无守卫、非元素访问、且未 pin 的读取才能走 void 快捷分支；pin=true
+            // 的字段必须走 probeBodyLines 生成 Exclude<..., null | undefined> 非空
+            // 检查（design 原则 8 构成门：契约记录了 pin，探针就必须真的检查）。
+            if ((spec.prelude?.length ?? 0) === 0 && spec.element === undefined && spec.pin !== true) {
               emit(`    void ${actualParam}.${path}`, fieldSeam)
             } else {
               emit('    {', fieldSeam)

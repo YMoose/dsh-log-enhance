@@ -116,6 +116,24 @@ test('an acknowledged suspect passes --check', () => {
   }
 })
 
+// AGENTS §2.4：登记表「存在但导出结构不可读」与语法损坏同为损坏，必须判红。
+// 历史缺陷：loadRegistry 把非数组导出静默转成空表——零 suspect 的仓配上
+// `IMPLICIT_SEAMS = {}` 会输出 all acknowledged 并 exit 0（假绿，实测复现）。
+test('a registry exporting a non-array IMPLICIT_SEAMS is corrupt and fails --check', () => {
+  const root = fixtureRoot('')
+  try {
+    const written = runScript(['--write'], root)
+    assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
+    writeFileSync(join(root, 'tests/contracts/implicit-seams.ts'), 'export const IMPLICIT_SEAMS = {}\n')
+    const broken = runScript(['--check'], root)
+    assert.equal(broken.status, 1,
+      'a structurally corrupt registry must fail, not silently degrade to an empty one')
+    assert.match(broken.stdout + broken.stderr, /cannot verify implicit-contract suspects|IMPLICIT_SEAMS/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 interface EngineApi {
   compareVersions(a: string, b: string): number
   loadCoupling(root: string): unknown
@@ -1938,7 +1956,7 @@ export function handleEvent(evt: SessionEvent): void {
     })
     assert.equal(guided.status, 0, `${guided.stdout}\n${guided.stderr}`)
     assert.match(guided.stdout, /NOTE: this root declares no @deepseek-ai\/\* dependency, but 2 workspace package\(s\) do:/)
-    assert.match(guided.stdout, /- packages\/alpha \(2 @deepseek-ai dep\(s\)\)/)
+    assert.match(guided.stdout, /- packages[\\/]alpha \(2 @deepseek-ai dep\(s\)\)/)
     assert.ok(!existsSync(join(alpha, 'coupling.json')), 'guidance must not execute or write anything')
 
     // 2) --recursive verify（免落盘路径）：发现表 + 逐包绿 + gamma 跳过 + 聚合行
@@ -1946,11 +1964,11 @@ export function handleEvent(evt: SessionEvent): void {
       encoding: 'utf8', timeout: 120_000,
     })
     assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
-    assert.match(verified.stdout, /packages\/alpha\s+2 @deepseek-ai dep\(s\) -> scan\/verify/)
-    assert.match(verified.stdout, /packages\/gamma\s+skip \(no @deepseek-ai\/\* dependency/)
-    assert.match(verified.stdout, /==> verify packages\/alpha/)
-    assert.match(verified.stdout, /==> verify packages\/beta/)
-    assert.doesNotMatch(verified.stdout, /==> verify packages\/gamma/)
+    assert.match(verified.stdout, /packages[\\/]alpha\s+2 @deepseek-ai dep\(s\) -> scan\/verify/)
+    assert.match(verified.stdout, /packages[\\/]gamma\s+skip \(no @deepseek-ai\/\* dependency/)
+    assert.match(verified.stdout, /==> verify packages[\\/]alpha/)
+    assert.match(verified.stdout, /==> verify packages[\\/]beta/)
+    assert.doesNotMatch(verified.stdout, /==> verify packages[\\/]gamma/)
     assert.match(verified.stdout, /recursive verify: 2 plugin package\(s\), green/)
 
     // 3) --recursive scan --write：coupling.json 只落进插件包，根目录不落盘
@@ -1991,8 +2009,8 @@ export function handleEvent(evt: SessionEvent): void {
       encoding: 'utf8', timeout: 120_000,
     })
     assert.equal(committed.status, 0, `${committed.stdout}\n${committed.stderr}`)
-    assert.match(committed.stdout, /packages\/alpha: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
-    assert.match(committed.stdout, /packages\/beta: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+    assert.match(committed.stdout, /packages[\\/]alpha: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+    assert.match(committed.stdout, /packages[\\/]beta: [1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
   } finally {
     rmSync(monorepo, { recursive: true, force: true })
   }
@@ -2144,7 +2162,7 @@ export function apply(app: Context): void {
       encoding: 'utf8', timeout: 60_000,
     })
     assert.equal(written.status, 0, `${written.stdout}\n${written.stderr}`)
-    assert.match(written.stdout, /packages\/alpha\s+1 @deepseek-ai dep\(s\) -> scan\/verify/,
+    assert.match(written.stdout, /packages[\\/]alpha\s+1 @deepseek-ai dep\(s\) -> scan\/verify/,
       'the yaml-declared package must appear in the discovery table')
     assert.match(written.stdout, /recursive scan: 1 plugin package\(s\), green/)
     assert.ok(existsSync(join(alpha, 'coupling.json')), 'the sub-package contract must actually be written')
@@ -2156,7 +2174,7 @@ export function apply(app: Context): void {
     assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
     assert.ok(!/no workspace packages found/.test(verified.stdout),
       'a pnpm-only monorepo must not read as an empty workspace')
-    assert.match(verified.stdout, /packages\/alpha.*[1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
+    assert.match(verified.stdout, /packages[\\/]alpha.*[1-9][0-9]*\/[1-9][0-9]* probes compile clean/)
 
     // 3) 无 --recursive 时同样给出透明引导
     const guided = spawnSync(process.execPath, [repoCli, 'scan', '--root', monorepo], {

@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repoCli = fileURLToPath(new URL('../../../cli.mjs', import.meta.url))
 if (existsSync(repoCli)) {
@@ -65,7 +65,7 @@ if (existsSync(repoCli)) {
   // 0.1.1-rc.2，而插件仓 coupling 引用它、其余包升 0.2.x——dsh-image-pathify 的
   // client.inject 声明，npm notarget 整体失败的实测）。
   test('pickUpstreamVersion falls back to the highest published version when the target is missing', async () => {
-    const cli = await import(repoCli) as { pickUpstreamVersion?: (target: string, versions: readonly string[]) => { version: string; fellBack: boolean } | null }
+    const cli = await import(pathToFileURL(repoCli).href) as { pickUpstreamVersion?: (target: string, versions: readonly string[]) => { version: string; fellBack: boolean } | null }
     assert.equal(typeof cli.pickUpstreamVersion, 'function', 'cli.mjs must export pickUpstreamVersion (guarded main)')
     const exact = cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.1.0-rc.6', '0.2.1-rc.5', '0.2.2-rc.1'])
     assert.deepEqual(exact, { version: '0.2.2-rc.1', fellBack: false })
@@ -78,6 +78,23 @@ if (existsSync(repoCli)) {
     // 比目标还新的包（target 时代不存在）没有可回落形态 → null（整体失败）。
     assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', ['0.3.0']), null, 'a package newer than the target cannot fall back')
     assert.equal(cli.pickUpstreamVersion!('0.2.2-rc.1', []), null, 'a package with no published versions cannot fall back')
+    // build metadata（semver 规范：不参与优先级比较，但必须被解析接受）。
+    // 历史缺陷：compareSemver 不认 +build → 目标不可解析 → 与所有候选比较得 0
+    // → 全部视为 ≤ target → 选最大（实测 '0.2.2+build.1' + ['0.2.1','0.3.0']
+    // → 0.3.0，超前）。回落上界必须对 +build 目标同样成立。
+    const buildTarget = cli.pickUpstreamVersion!('0.2.2+build.1', ['0.2.1', '0.3.0'])
+    assert.deepEqual(buildTarget, { version: '0.2.1', fellBack: true },
+      'build metadata must not break the <= target ceiling (0.3.0 is still ahead of 0.2.2+build.1)')
+    assert.deepEqual(cli.pickUpstreamVersion!('0.2.2+build.1', ['0.2.2', '0.3.0']),
+      { version: '0.2.2', fellBack: true },
+      'a version equal apart from build metadata satisfies the target')
+    assert.deepEqual(cli.pickUpstreamVersion!('0.2.2', ['0.2.2+build.0']),
+      { version: '0.2.2+build.0', fellBack: true },
+      'build metadata does not raise a published version above the bare target')
+    // 不可解析的目标整体失败：unparseable → 0 的比较语义在回落循环里会被曲解
+    // 为「≤ target」，必须入口拦截，绝不参与回落。
+    assert.equal(cli.pickUpstreamVersion!('latest', ['0.2.1']), null,
+      'an unparseable target cannot fall back to anything')
   })
 
   // design.md 2.8：manifest 注入形态的 registry 存在性检查。client.inject 模块
@@ -85,7 +102,7 @@ if (existsSync(repoCli)) {
   // `verify --upstream` 对它们只做存在性检查（不 pack、无探针）——上游改名/下架
   // 在装配阶段显式报错。提取与判定逻辑为纯函数，离线单测。
   test('manifestInjectModulesOf extracts sorted unique client.inject declarations', async () => {
-    const cli = await import(repoCli) as { manifestInjectModulesOf?: (root: string) => string[] }
+    const cli = await import(pathToFileURL(repoCli).href) as { manifestInjectModulesOf?: (root: string) => string[] }
     assert.equal(typeof cli.manifestInjectModulesOf, 'function', 'cli.mjs must export manifestInjectModulesOf (guarded main)')
     const root = mkdtempSync(join(tmpdir(), 'dsh-inject-'))
     try {
@@ -112,11 +129,11 @@ if (existsSync(repoCli)) {
     }
   })
 
-  test('verifyInjectModulesOnRegistry names the module and its declaring repo when the registry lacks it', async () => {
-    const cli = await import(repoCli) as {
+  test('verifyInjectModulesOnRegistry separates registry verdicts from environment failures', async () => {
+    const cli = await import(pathToFileURL(repoCli).href) as {
       verifyInjectModulesOnRegistry?: (
         modules: Map<string, readonly string[]>,
-        runView: (name: string) => { status: number; stdout: string; stderr: string },
+        runView: (name: string) => { status: number | null; stdout?: string; stderr?: string; error?: unknown },
       ) => string | null
     }
     assert.equal(typeof cli.verifyInjectModulesOnRegistry, 'function', 'cli.mjs must export verifyInjectModulesOnRegistry (guarded main)')
@@ -126,11 +143,36 @@ if (existsSync(repoCli)) {
       null,
       'a module the registry still serves passes the existence check',
     )
-    const failure = cli.verifyInjectModulesOnRegistry!(modules, () => ({ status: 1, stdout: '', stderr: 'npm error code E404' }))
-    assert.ok(failure !== null, 'a module missing from the registry must produce an explicit failure')
-    assert.match(failure, /dsh-client-ui-layout/, 'the failure names the module')
-    assert.match(failure, /fixture-a/, 'the failure names the declaring repo')
-    assert.match(failure, /rename|unpublish/i, 'the failure points at rename/unpublish as the likely cause')
-    assert.match(failure, /E404/, 'the failure keeps the underlying npm error for diagnosis')
+    const notFound = cli.verifyInjectModulesOnRegistry!(modules, () => ({ status: 1, stdout: '', stderr: 'npm error code E404' }))
+    assert.ok(notFound !== null, 'a module missing from the registry must produce an explicit failure')
+    assert.match(notFound, /dsh-client-ui-layout/, 'the failure names the module')
+    assert.match(notFound, /fixture-a/, 'the failure names the declaring repo')
+    assert.match(notFound, /rename|unpublish/i, 'the failure points at rename/unpublish as the likely cause')
+    assert.match(notFound, /E404/, 'the failure keeps the underlying npm error for diagnosis')
+    // 环境故障绝不冒充 registry 结论（design 原则 8 环境门 fail-fast）：spawn
+    // 失败（Windows 无 shell 起 npm、PATH 摘除）与非 404 的 npm 非零退出都是
+    // 「什么都没查成」，不是「registry 上没有」——误导用户改 manifest 比报错更糟。
+    const spawnFailure = cli.verifyInjectModulesOnRegistry!(modules,
+      () => ({ status: null, stdout: '', stderr: '', error: new Error('spawnSync npm ENOENT') }))
+    assert.ok(spawnFailure !== null, 'a spawn failure must surface, never pass')
+    assert.match(spawnFailure, /cannot run npm/i, 'the message states npm itself failed to run')
+    assert.match(spawnFailure, /nothing was queried/i, 'the message states no registry conclusion was reached')
+    assert.doesNotMatch(spawnFailure, /not found on the npm registry|update dsh\.client\.inject|rename|unpublish/i,
+      'a spawn failure must not be phrased as a registry verdict')
+    // shell:true 形态：npm 缺失由 shell 报告（POSIX exit 127 / Windows cmd 9009），
+    // stderr 是 "npm: not found"——绝不能被大小写不敏感的 404 匹配误读成
+    // 「registry 上不存在」（真实复验逮住：PATH 摘除时仍输出改名/下架话术）。
+    const shellNotFound = cli.verifyInjectModulesOnRegistry!(modules,
+      () => ({ status: 127, stdout: '', stderr: '/bin/sh: 1: npm: not found' }))
+    assert.ok(shellNotFound !== null, 'a shell command-not-found must surface, never pass')
+    assert.match(shellNotFound, /cannot run npm/i, 'command-not-found is an environment failure')
+    assert.doesNotMatch(shellNotFound, /not found on the npm registry|update dsh\.client\.inject|rename|unpublish/i,
+      '"npm: not found" must not be read as a registry 404')
+    const networkFailure = cli.verifyInjectModulesOnRegistry!(modules,
+      () => ({ status: 1, stdout: '', stderr: 'npm error code ETIMEDOUT' }))
+    assert.ok(networkFailure !== null, 'a non-404 npm failure must surface, never pass')
+    assert.match(networkFailure, /cannot query/i, 'the message says the registry could not be queried')
+    assert.doesNotMatch(networkFailure, /update dsh\.client\.inject|rename|unpublish/i,
+      'a network failure must not send the user editing their manifest')
   })
 }

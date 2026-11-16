@@ -1620,7 +1620,17 @@ async function loadRegistry() {
   try {
     // Node ≥ 22.18 / 24 strips the types in place; the file has no runtime deps.
     const module = await import(pathToFileURL(REGISTRY_PATH).href)
-    const seams = Array.isArray(module.IMPLICIT_SEAMS) ? module.IMPLICIT_SEAMS : []
+    // AGENTS §2.4：登记表「存在但导出结构不可读」（如 IMPLICIT_SEAMS = {}）与
+    // 语法损坏同为损坏状态，必须判红——静默转空表会让零 suspect 的仓假绿
+    // （无法验证的报告绝不能读作 all acknowledged）。
+    if (!Array.isArray(module.IMPLICIT_SEAMS)) {
+      return {
+        seams: [], specifications: [],
+        error: `cannot load ${relative(REPO_ROOT, REGISTRY_PATH).replaceAll('\\', '/')}: IMPLICIT_SEAMS must export an array (got ${typeof module.IMPLICIT_SEAMS})`,
+        missing: false,
+      }
+    }
+    const seams = module.IMPLICIT_SEAMS
     const specifications = seams.flatMap(seam => [
       ...(seam.acknowledged ?? []).map(raw => ({ seam: seam.id, effect: 'acknowledged', ...acknowledgementMatcher(raw) })),
       ...(seam.ignored ?? []).map(raw => ({ seam: seam.id, effect: 'ignored', ...acknowledgementMatcher(raw) })),
