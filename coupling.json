@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "generator": {
-    "dshSeam": "ref:09a9f0df7d1e",
+    "dshSeam": "ref:56056f405ead",
     "typescript": "6.0.3"
   },
-  "generatedAt": "2026-11-15T07:31:47.756Z",
+  "generatedAt": "2026-11-16T05:03:29.099Z",
   "packages": {
     "@deepseek-ai/cordis": {
       "declaredIn": [
@@ -407,7 +407,7 @@
             "guards": [
               {
                 "expr": "ctx.mcpManager",
-                "kind": "defined"
+                "kind": "definedUndefined"
               }
             ],
             "pin": true
@@ -427,7 +427,7 @@
             "guards": [
               {
                 "expr": "ctx.mcpManager",
-                "kind": "defined"
+                "kind": "definedUndefined"
               }
             ],
             "pin": true
@@ -457,7 +457,7 @@
             "guards": [
               {
                 "expr": "ctx.mcpManager",
-                "kind": "defined"
+                "kind": "definedUndefined"
               }
             ],
             "pin": true
@@ -501,7 +501,7 @@
             "guards": [
               {
                 "expr": "ctx.mcpManager",
-                "kind": "defined"
+                "kind": "definedUndefined"
               }
             ],
             "pin": true
@@ -1161,7 +1161,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "truthy"
               }
             ],
             "pin": true
@@ -1176,7 +1176,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "truthy"
               }
             ],
             "pin": true
@@ -1186,7 +1186,7 @@
             "guards": [
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "definedBoth"
               },
               {
                 "expr": "exec.name",
@@ -1195,7 +1195,7 @@
               },
               {
                 "expr": "exec.parent",
-                "kind": "defined"
+                "kind": "definedUndefined"
               }
             ]
           },
@@ -1204,7 +1204,7 @@
             "guards": [
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "definedBoth"
               },
               {
                 "expr": "exec.name",
@@ -1228,7 +1228,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "truthy"
               }
             ],
             "pin": true
@@ -1243,11 +1243,11 @@
               },
               {
                 "expr": "exec.parent",
-                "kind": "defined"
+                "kind": "definedUndefined"
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "definedBoth"
               }
             ]
           },
@@ -1261,7 +1261,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "definedBoth"
               }
             ]
           }
@@ -1280,7 +1280,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "truthy"
               }
             ],
             "pin": true
@@ -1300,7 +1300,7 @@
               },
               {
                 "expr": "exec.agent",
-                "kind": "defined"
+                "kind": "truthy"
               }
             ]
           }
@@ -1400,6 +1400,10 @@
               {
                 "expr": "result.isError",
                 "kind": "falsy"
+              },
+              {
+                "expr": "result.value",
+                "kind": "definedNull"
               }
             ],
             "pin": true

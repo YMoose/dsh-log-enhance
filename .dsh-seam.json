@@ -1,21 +1,23 @@
 {
   "source": {
     "repo": "https://github.com/YMoose/dsh-seam",
-    "ref": "4a0276781f295f619b3a09cba1160f4827faad97"
+    "ref": "56056f405eaded5a03b6876b30d89b2d2d65c2a2"
   },
   "files": {
-    "scripts/analyze-dsh-coupling.mjs": "c4675c632d7b02ab9e9604539d8dc9ab02c02d1b7e9bacfa1a7219c1d34ead01",
+    "scripts/analyze-dsh-coupling.mjs": "ec9922c3cf5136262d0d218df6c94a5a1b9eb31e75b1a62a8881ddd54118935c",
     "scripts/bump-upstream.mjs": "76740481ad9d4dc10064aedb122c5e543254f6c39d346915ee87cc7aeea02c77",
     "scripts/check-compat.mjs": "12c02e4ed3b65a5853343484bf472e5ccbac32f4940c7bef0a2a01d5ba8babaf",
     "scripts/verify-coupling.mjs": "53639a622f05616190299923eb8be52aac7bb02ec1b2232e23eca24f5a91f149",
     "scripts/write-baseline.mjs": "4b6d2a773061fad8f71f87a01510b00c38de5f2fa24961c647b61300d7307f56",
+    "tests/ambient-types-dir.test.ts": "74662c95a2cbd97b449764a34cbb04a4ab4c5d276298e7358e4bf49b415cb316",
     "tests/baseline-fingerprint.test.ts": "1c73a5504f0f20f25f37640cbe458fb485269dd034b3bb67bc6411c60cd5ecdd",
     "tests/bump-upstream.test.ts": "b926040a15d659032915b43f1bbee18f6f570ead1e3d9c0f6ec30d2126ce8932",
     "tests/cli-manifest.test.ts": "39e506aa2f1c9b07907ab39e9e28937dcf6f6491811c0ce85a40f1927c1c076c",
-    "tests/coupling-gate.test.ts": "2aa35a1184256ff3975de5bfc8c4397e1e44bd2a80bd8fb5cce10c3e7788ff2e",
+    "tests/coupling-gate.test.ts": "10b28b37282035c84daf933d2c333ab80b4e5f17f79b9823f4470b5e56256c2f",
+    "tests/guard-null.test.ts": "b7e9ffcc6970e5ee6c57945ff4390164b3f189da21e2fa09fd2f47b647cb8de0",
     "tests/payload-pin.test.ts": "a29cb20a1bca3471dea7b8d7a5a72bdb8c51994da614c484363a4c1389702fb4",
     "tests/seam-suite.test.ts": "c12f9e51325ad90475bf298c53b98b3c10e695b462c72b563ae787794b38981d",
-    "tests/seam/engine.ts": "08499e149f9e1ecb64570a84684853644cf5561405ed2be9595712fe7c575aed",
+    "tests/seam/engine.ts": "6757d8d22020f0f25371281095e418db588b48be64d15f77ee0ef8a1f42c8f38",
     "tests/seam/standard-specs.ts": "6e27debb834650fbc96d4fcfea602155cd679d21ed6c431afd85c710965d2bfb",
     "tests/typescript-native-guard.test.ts": "2232d1def074bb61aba8da2669b37b8c8115264ba11e5fc0a9c16ca03dfc303a",
     "tests/verify-types-root.test.ts": "2c7087ed8038575eb24309a82744ec3bc3ab907a6c16ae9e38c2f3deb6041167",

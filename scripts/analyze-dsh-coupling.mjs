@@ -128,16 +128,20 @@ function listDtsFiles(directory) {
       if (!statSync(full).isDirectory() && entry.endsWith('.d.ts')) files.push(full)
     }
   } catch {}
-  const srcDir = join(directory, 'src')
-  if (existsSync(srcDir)) {
-    const walk = current => {
-      for (const entry of readdirSync(current)) {
-        const full = join(current, entry)
-        if (statSync(full).isDirectory()) walk(full)
-        else if (entry.endsWith('.d.ts')) files.push(full)
-      }
+  // L2a 声明文件落点：src/ 内联 + 独立 types/ 目录。必须与 engine 的
+  // collectAmbientDtsFiles 保持同一集合——扫描器看到的 ambient 与探针程序
+  // 看到的 ambient 不一致时，要么漏记增强、要么 import 解析不到（假红）。
+  const walk = current => {
+    for (const entry of readdirSync(current)) {
+      const full = join(current, entry)
+      if (statSync(full).isDirectory()) walk(full)
+      else if (entry.endsWith('.d.ts')) files.push(full)
     }
-    try { walk(srcDir) } catch {}
+  }
+  for (const sub of ['src', 'types']) {
+    const dir = join(directory, sub)
+    if (!existsSync(dir)) continue
+    try { walk(dir) } catch {}
   }
   return files.sort()
 }
@@ -697,7 +701,9 @@ function analyzeFile(path, root, state) {
     /** 守卫（defined/falsy）证明其表达式被空值感知地检查过。 */
     const noteGuardTolerance = guards => {
       for (const guard of guards ?? []) {
-        if (guard.kind === 'defined' || guard.kind === 'falsy') noteNullAwareExpr(guard.expr)
+        if (['defined', 'definedUndefined', 'definedNull', 'definedBoth', 'nonnull', 'truthy', 'falsy'].includes(guard.kind)) {
+          noteNullAwareExpr(guard.expr)
+        }
       }
     }
 
@@ -796,10 +802,20 @@ function analyzeFile(path, root, state) {
             const resolved = resolve(access)
             if (resolved === null) continue
             const expr = resolved.expr
-            if (ts.isIdentifier(literalNode) && literalNode.text === 'undefined') {
+            // `undefined` 是标识符节点，`null` 是 NullKeyword 字面量节点——两者都要认。
+            const literalText = literalNode.kind === ts.SyntaxKind.NullKeyword ? 'null'
+              : ts.isIdentifier(literalNode) ? literalNode.text : null
+            if (literalText === 'undefined' || literalText === 'null') {
+              // 判空守卫按 TS 官方语义精确分派（TS 2.0 文档：`===`/`!==` 只查
+              // 指定的空值；`==`/`!=` 与任一空值比较时两者都查）。守卫强度必须
+              // 与写法等强：记强了假绿（漏真漂移）、记弱了假红（冤枉好代码）。
+              const loose = operator === ts.SyntaxKind.EqualsEqualsToken
+                || operator === ts.SyntaxKind.ExclamationEqualsToken
+              const kind = loose ? 'definedBoth'
+                : literalText === 'null' ? 'definedNull' : 'definedUndefined'
               return negated
-                ? { positive: [{ expr, kind: 'defined' }], negative: null }
-                : { positive: null, negative: [{ expr, kind: 'defined' }] }
+                ? { positive: [{ expr, kind }], negative: null }
+                : { positive: null, negative: [{ expr, kind }] }
             }
             if (ts.isStringLiteralLike(literalNode)) {
               const literal = literalNode.text
@@ -810,11 +826,13 @@ function analyzeFile(path, root, state) {
           }
         }
       }
-      // Truthiness of a tracked chain: `x` narrows optionals to defined and
-      // `!x` (via the negation above) to falsy.
+      // Truthiness of a tracked chain: `x` narrows by ToBoolean (falsy 全排除，
+      // 比 nullish 更宽)，`!x` (via the negation above) to falsy. 真值守卫此前
+      // 被记成 defined（只排 undefined）——重放强度弱于源码，`T | null` 上游下
+      // 假红；truthy 精确重放 `if (!x) return`。
       const resolved = resolve(unwrapped)
       if (resolved !== null) {
-        return { positive: [{ expr: resolved.expr, kind: 'defined' }], negative: [{ expr: resolved.expr, kind: 'falsy' }] }
+        return { positive: [{ expr: resolved.expr, kind: 'truthy' }], negative: [{ expr: resolved.expr, kind: 'falsy' }] }
       }
       return { positive: null, negative: null }
     }
@@ -979,14 +997,22 @@ function analyzeFile(path, root, state) {
           // unpinned), or `agent` would be pinned despite the source's `?.`.
           const optional = []
           for (let link = current; ts.isPropertyAccessExpression(link); link = unwrap(link.expression)) {
-            if (link.questionDotToken !== undefined) {
+            // `exec.agent?.id` 与 `exec.agent!.id` 都向链上前缀注入空值保护：
+            // `?.` 语义上两种空都短路（definedBoth）；`!` 是作者显式断言
+            // （nonnull，重放 `if (x == null) return` 编译语义等价）。前缀自身
+            // 的裸记录必须携带该守卫且不钉——否则 `?.` 时 agent 被误钉、`!` 时
+            // 断言信息丢失、链尾访问裸奔（rv-null 形态 c/d 假红）。
+            if (link.questionDotToken !== undefined || ts.isNonNullExpression(link.expression)) {
+              const guard = link.questionDotToken !== undefined
+                ? { kind: 'definedBoth' }
+                : { kind: 'nonnull' }
               const prefix = resolve(link.expression)
               if (prefix !== null) {
-                optional.push({ expr: prefix.expr, kind: 'defined' })
+                optional.push({ expr: prefix.expr, ...guard })
                 noteNullAwareExpr(prefix.expr)
                 for (const key of prefix.keys) {
                   recordFieldPath(key, prefix.segments.join('.'), prefix.rootType, siteOf(link),
-                    [{ expr: prefix.expr, kind: 'defined' }], scope.loop, false)
+                    [{ expr: prefix.expr, ...guard }], scope.loop, false)
                 }
               }
             }

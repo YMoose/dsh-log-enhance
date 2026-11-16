@@ -1786,7 +1786,7 @@ export function apply(ctx: Context): void {
     assert.ok(coupling.borrowed?.includes('mcpLike'), 'cast-reached runtime service must enter borrowed')
     const loggerInfo = coupling.fieldPaths['@deepseek-ai/cordis']?.['logger.info']
     assert.ok(loggerInfo !== undefined, 'guarded anchored access must stay a field path')
-    assert.ok(loggerInfo.accesses.some(access => access.guards.some(guard => guard.expr === 'ctx.mcpLike' && guard.kind === 'defined')),
+    assert.ok(loggerInfo.accesses.some(access => access.guards.some(guard => guard.expr === 'ctx.mcpLike' && guard.kind === 'definedUndefined')),
       'flow guard over the borrowed service must be recorded on the anchored access')
 
     const verified = spawnSync(process.execPath, [VERIFY_SCRIPT, join(pluginDir, 'coupling.json')], {

@@ -52,8 +52,20 @@ export interface PathRecord {
 export interface Guard {
   /** 插件源码里的访问链文本，如 `event.type`。 */
   readonly expr: string
-  /** `eq`/`ne`：字面量比较；`defined`：链非 undefined；`falsy`：链为假值。 */
-  readonly kind: 'eq' | 'ne' | 'defined' | 'falsy'
+  /** 收窄条件（精确重放，语义依据 TS 2.0 官方规范：`===`/`!==` 只查指定的
+   *  空值，`==`/`!=` 配 null/undefined 两者都查）：
+   *  - `eq`/`ne`：字面量比较（判别式）
+   *  - `definedUndefined`：链非 undefined（严格 `!== undefined`）
+   *  - `definedNull`：链非 null（严格 `!== null`）
+   *  - `definedBoth`：链非空（宽松 `!= null`、`?.` 链——两种空都挡）
+   *  - `nonnull`：作者 `!` 断言非空（重放等价排两者，摘要点名作者断言）
+   *  - `truthy`：真值测试（`if (x)`，重放 `if (!x) return`，精确 ToBoolean）
+   *  - `falsy`：链为假值
+   *  - `defined`：旧契约遗留（当时扫描器只能识别 undefined 系列），读取时
+   *    按 definedUndefined 语义重放——忠实于旧扫描器的识别范围。 */
+  readonly kind: 'eq' | 'ne'
+    | 'defined' | 'definedUndefined' | 'definedNull' | 'definedBoth'
+    | 'nonnull' | 'truthy' | 'falsy'
   readonly literal?: string
 }
 
@@ -350,11 +362,16 @@ function parameterNameOf(rootType: string): string {
   return identifier.charAt(0).toLowerCase() + identifier.slice(1)
 }
 
-/** 类型收窄条件 → 检查代码里的收窄行（不含结尾的 `return`/`continue`）。 */
+/** 类型收窄条件 → 检查代码里的收窄行（不含结尾的 `return`/`continue`）。
+ *  每个 kind 的重放行 = 该写法在 TS 收窄语义下真实证明的事，不多不少——
+ *  重放过宽 = 假绿（原则 8），过严 = 假红。 */
 export function guardLine(guard: Guard): string {
   if (guard.kind === 'eq') return `if (${guard.expr} !== ${quote(guard.literal ?? '')})`
   if (guard.kind === 'ne') return `if (${guard.expr} === ${quote(guard.literal ?? '')})`
-  if (guard.kind === 'defined') return `if (${guard.expr} === undefined)`
+  if (guard.kind === 'defined' || guard.kind === 'definedUndefined') return `if (${guard.expr} === undefined)`
+  if (guard.kind === 'definedNull') return `if (${guard.expr} === null)`
+  if (guard.kind === 'definedBoth' || guard.kind === 'nonnull') return `if (${guard.expr} == null)`
+  if (guard.kind === 'truthy') return `if (!${guard.expr})`
   return `if (${guard.expr})`
 }
 
@@ -363,7 +380,11 @@ export function guardSummary(guards: readonly Guard[]): string {
   return guards.map(guard => {
     if (guard.kind === 'eq') return `${guard.expr}='${guard.literal}'`
     if (guard.kind === 'ne') return `${guard.expr}!='${guard.literal}'`
-    if (guard.kind === 'defined') return `${guard.expr} defined`
+    if (guard.kind === 'defined' || guard.kind === 'definedUndefined') return `${guard.expr} defined`
+    if (guard.kind === 'definedNull') return `${guard.expr} non-null`
+    if (guard.kind === 'definedBoth') return `${guard.expr} non-nullish`
+    if (guard.kind === 'nonnull') return `${guard.expr} asserted`
+    if (guard.kind === 'truthy') return `${guard.expr} truthy`
     return `!${guard.expr}`
   }).join(' & ')
 }
@@ -1299,16 +1320,21 @@ function collectAmbientDtsFiles(root: string): readonly string[] {
       if (!statSync(full).isDirectory()) files.push(full)
     }
   } catch {}
-  const srcDir = join(root, 'src')
-  if (existsSync(srcDir)) {
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry)
-        if (statSync(full).isDirectory()) walk(full)
-        else if (entry.endsWith('.d.ts')) files.push(full)
-      }
+  // L2a 声明文件的常见落点：src/ 内联，或独立的 types/ 目录（tsconfig include
+  // 布局）。两侧集合必须与扫描器的 listDtsFiles 一致——探针程序少看到一份
+  // 声明，import 就解析不到、被误报 broken root type（rv-ambient 实测）。
+  // 构建产物目录（lib/ 等）不入。
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry)
+      if (statSync(full).isDirectory()) walk(full)
+      else if (entry.endsWith('.d.ts')) files.push(full)
     }
-    try { walk(srcDir) } catch {}
+  }
+  for (const sub of ['src', 'types']) {
+    const dir = join(root, sub)
+    if (!existsSync(dir)) continue
+    try { walk(dir) } catch {}
   }
   return files.sort()
 }
